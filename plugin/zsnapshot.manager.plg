@@ -1,0 +1,53 @@
+<?xml version='1.0' standalone='yes'?>
+<!DOCTYPE PLUGIN [
+<!ENTITY name "zsnapshot.manager">
+<!ENTITY author "atsrxL">
+<!ENTITY version "2026.08.19a">
+<!ENTITY launch "Tools/ZFS-Snapshots">
+<!ENTITY pluginURL "https://raw.githubusercontent.com/atsrxL/unraid-zsnapshot-manager/main/plugin/zsnapshot.manager.plg">
+<!ENTITY baseURL "https://raw.githubusercontent.com/atsrxL/unraid-zsnapshot-manager/main/src/usr/local/emhttp/plugins/zsnapshot.manager">
+]>
+<PLUGIN name="&name;" author="&author;" version="&version;" launch="&launch;" pluginURL="&pluginURL;" icon="camera" min="7.0.0" project="https://github.com/atsrxL/unraid-zsnapshot-manager" readme="https://github.com/atsrxL/unraid-zsnapshot-manager#readme">
+<CHANGES>
+### 2026.08.19a
+- Initial test release
+- Snapshot create/delete/hold/release/browse/clone
+- Safety-guarded rollback to newest snapshot only
+- Scheduled snapshots with cron and retention
+- Recursive snapshot metadata and generation-safe retention
+- Unraid notifications and activity log
+</CHANGES>
+
+<FILE Name="/usr/local/emhttp/plugins/&name;/include/lib.php">
+<URL>&baseURL;/include/lib.php</URL>
+</FILE>
+<FILE Name="/usr/local/emhttp/plugins/&name;/scripts/zsm-scheduler">
+<URL>&baseURL;/scripts/zsm-scheduler</URL>
+</FILE>
+<FILE Name="/usr/local/emhttp/plugins/&name;/ZFS-Snapshots.page">
+<URL>&baseURL;/ZFS-Snapshots.page</URL>
+</FILE>
+<FILE Name="/usr/local/emhttp/plugins/&name;/ZFS-Schedules.page">
+<URL>&baseURL;/ZFS-Schedules.page</URL>
+</FILE>
+
+<FILE Run="/bin/bash">
+<INLINE><![CDATA[
+set -e
+mkdir -p /boot/config/plugins/zsnapshot.manager
+[ -f /boot/config/plugins/zsnapshot.manager/schedules.json ] || printf '[]\n' > /boot/config/plugins/zsnapshot.manager/schedules.json
+chmod 0755 /usr/local/emhttp/plugins/zsnapshot.manager/scripts/zsm-scheduler
+php -r "require '/usr/local/emhttp/plugins/zsnapshot.manager/include/lib.php'; zsm_regenerate_cron();"
+echo "ZFS Snapshot Manager 2026.08.19a installed"
+]]></INLINE>
+</FILE>
+
+<FILE Run="/bin/bash" Method="remove">
+<INLINE><![CDATA[
+rm -rf /usr/local/emhttp/plugins/zsnapshot.manager
+rm -f /boot/config/plugins/zsnapshot.manager/zsnapshot-manager.cron
+/usr/local/sbin/update_cron >/dev/null 2>&1 || true
+# schedules.json is intentionally preserved for reinstall/recovery
+]]></INLINE>
+</FILE>
+</PLUGIN>
