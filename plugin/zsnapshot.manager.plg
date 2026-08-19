@@ -2,13 +2,20 @@
 <!DOCTYPE PLUGIN [
 <!ENTITY name "zsnapshot.manager">
 <!ENTITY author "atsrxL">
-<!ENTITY version "2026.08.19a">
-<!ENTITY launch "Tools/ZFS-Snapshots">
+<!ENTITY version "2026.08.19b">
+<!ENTITY launch "Settings/ZFS-Snapshot-Manager">
 <!ENTITY pluginURL "https://raw.githubusercontent.com/atsrxL/unraid-zsnapshot-manager/main/plugin/zsnapshot.manager.plg">
 <!ENTITY baseURL "https://raw.githubusercontent.com/atsrxL/unraid-zsnapshot-manager/main/src/usr/local/emhttp/plugins/zsnapshot.manager">
 ]>
 <PLUGIN name="&name;" author="&author;" version="&version;" launch="&launch;" pluginURL="&pluginURL;" icon="camera" min="7.0.0" project="https://github.com/atsrxL/unraid-zsnapshot-manager" readme="https://github.com/atsrxL/unraid-zsnapshot-manager#readme">
 <CHANGES>
+### 2026.08.19b
+- Fixed missing CSRF tokens on snapshot and schedule POST actions
+- Moved plugin to Settings > System Settings
+- Added one native xmenu entry with Snapshots and Schedules tabs
+- Added guided schedule builder for minutes/hourly/daily/weekly/monthly/custom schedules
+- Policy list continues to display standard 5-field cron expressions
+
 ### 2026.08.19a
 - Initial test release
 - Snapshot create/delete/hold/release/browse/clone
@@ -24,6 +31,9 @@
 <FILE Name="/usr/local/emhttp/plugins/&name;/scripts/zsm-scheduler">
 <URL>&baseURL;/scripts/zsm-scheduler</URL>
 </FILE>
+<FILE Name="/usr/local/emhttp/plugins/&name;/ZFS-Snapshot-Manager.page">
+<URL>&baseURL;/ZFS-Snapshot-Manager.page</URL>
+</FILE>
 <FILE Name="/usr/local/emhttp/plugins/&name;/ZFS-Snapshots.page">
 <URL>&baseURL;/ZFS-Snapshots.page</URL>
 </FILE>
@@ -38,7 +48,7 @@ mkdir -p /boot/config/plugins/zsnapshot.manager
 [ -f /boot/config/plugins/zsnapshot.manager/schedules.json ] || printf '[]\n' > /boot/config/plugins/zsnapshot.manager/schedules.json
 chmod 0755 /usr/local/emhttp/plugins/zsnapshot.manager/scripts/zsm-scheduler
 php -r "require '/usr/local/emhttp/plugins/zsnapshot.manager/include/lib.php'; zsm_regenerate_cron();"
-echo "ZFS Snapshot Manager 2026.08.19a installed"
+echo "ZFS Snapshot Manager 2026.08.19b installed"
 ]]></INLINE>
 </FILE>
 
