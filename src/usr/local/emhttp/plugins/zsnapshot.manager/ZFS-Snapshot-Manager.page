@@ -1,0 +1,5 @@
+Menu="OtherSettings"
+Type="xmenu"
+Title="ZFS Snapshot Manager"
+Tabs="true"
+Icon="fa-camera"
