@@ -12,12 +12,8 @@ const ZSM_POLICY_PROP = 'io.github.atsrxl:policy';
 
 function zsm_init(): void
 {
-    if (!is_dir(ZSM_CONFIG_DIR)) {
-        @mkdir(ZSM_CONFIG_DIR, 0755, true);
-    }
-    if (!file_exists(ZSM_SCHEDULES)) {
-        @file_put_contents(ZSM_SCHEDULES, "[]\n");
-    }
+    if (!is_dir(ZSM_CONFIG_DIR)) @mkdir(ZSM_CONFIG_DIR, 0755, true);
+    if (!file_exists(ZSM_SCHEDULES)) @file_put_contents(ZSM_SCHEDULES, "[]\n");
 }
 
 function zsm_log(string $message): void
@@ -28,8 +24,7 @@ function zsm_log(string $message): void
 function zsm_exec(array $args, ?int &$code = null): string
 {
     $cmd = implode(' ', array_map('escapeshellarg', $args)) . ' 2>&1';
-    $out = [];
-    $rc = 0;
+    $out = []; $rc = 0;
     exec($cmd, $out, $rc);
     $code = $rc;
     return trim(implode("\n", $out));
@@ -47,31 +42,27 @@ function zsm_valid_snapshot_name(string $name): bool
 
 function zsm_valid_snapshot(string $name): bool
 {
-    if (substr_count($name, '@') !== 1) {
-        return false;
-    }
+    if (substr_count($name, '@') !== 1) return false;
     [$dataset, $snap] = explode('@', $name, 2);
     return zsm_valid_dataset($dataset) && zsm_valid_snapshot_name($snap);
 }
 
 function zsm_datasets(): array
 {
-    $out = zsm_exec(['/sbin/zfs', 'list', '-H', '-p', '-o', 'name,type,mountpoint,used,available', '-t', 'filesystem,volume'], $rc);
-    if ($rc !== 0 || $out === '') {
-        return [];
-    }
+    $out = zsm_exec(['/sbin/zfs','list','-H','-p','-o','name,type,mountpoint,used,available','-t','filesystem,volume'], $rc);
+    if ($rc !== 0 || $out === '') return [];
     $rows = [];
     foreach (explode("\n", $out) as $line) {
         $p = explode("\t", $line);
         if (count($p) < 5) continue;
-        $rows[] = ['name'=>$p[0], 'type'=>$p[1], 'mountpoint'=>$p[2], 'used'=>(int)$p[3], 'available'=>(int)$p[4]];
+        $rows[] = ['name'=>$p[0],'type'=>$p[1],'mountpoint'=>$p[2],'used'=>(int)$p[3],'available'=>(int)$p[4]];
     }
     return $rows;
 }
 
 function zsm_snapshots(): array
 {
-    $out = zsm_exec(['/sbin/zfs', 'list', '-H', '-p', '-t', 'snapshot', '-o', 'name,creation,used,refer', '-s', 'creation'], $rc);
+    $out = zsm_exec(['/sbin/zfs','list','-H','-p','-t','snapshot','-o','name,creation,used,refer','-s','creation'], $rc);
     if ($rc !== 0 || $out === '') return [];
     $rows = [];
     foreach (explode("\n", $out) as $line) {
@@ -82,9 +73,9 @@ function zsm_snapshots(): array
         $source = zsm_get_prop($p[0], ZSM_SOURCE_PROP);
         $policy = zsm_get_prop($p[0], ZSM_POLICY_PROP);
         $rows[] = [
-            'name'=>$p[0], 'dataset'=>$dataset, 'snap'=>$snap, 'creation'=>(int)$p[1],
-            'used'=>(int)$p[2], 'refer'=>(int)$p[3], 'held'=>zsm_is_held($p[0]),
-            'managed'=>$managed === '1', 'source'=>$source === '-' ? '' : $source,
+            'name'=>$p[0],'dataset'=>$dataset,'snap'=>$snap,'creation'=>(int)$p[1],
+            'used'=>(int)$p[2],'refer'=>(int)$p[3],'held'=>zsm_is_held($p[0]),
+            'managed'=>$managed === '1','source'=>$source === '-' ? '' : $source,
             'policy'=>$policy === '-' ? '' : $policy,
         ];
     }
@@ -93,20 +84,33 @@ function zsm_snapshots(): array
 
 function zsm_get_prop(string $target, string $prop): string
 {
-    $out = zsm_exec(['/sbin/zfs', 'get', '-H', '-o', 'value', $prop, $target], $rc);
+    $out = zsm_exec(['/sbin/zfs','get','-H','-o','value',$prop,$target], $rc);
     return $rc === 0 ? trim($out) : '-';
 }
 
 function zsm_set_metadata(string $snapshot, string $source, string $policy=''): void
 {
-    zsm_exec(['/sbin/zfs', 'set', ZSM_MANAGED_PROP . '=1', $snapshot], $rc1);
-    zsm_exec(['/sbin/zfs', 'set', ZSM_SOURCE_PROP . '=' . $source, $snapshot], $rc2);
-    if ($policy !== '') zsm_exec(['/sbin/zfs', 'set', ZSM_POLICY_PROP . '=' . $policy, $snapshot], $rc3);
+    zsm_exec(['/sbin/zfs','set',ZSM_MANAGED_PROP . '=1',$snapshot], $r1);
+    zsm_exec(['/sbin/zfs','set',ZSM_SOURCE_PROP . '=' . $source,$snapshot], $r2);
+    if ($policy !== '') zsm_exec(['/sbin/zfs','set',ZSM_POLICY_PROP . '=' . $policy,$snapshot], $r3);
+}
+
+function zsm_recursive_generation(string $dataset, string $snap): array
+{
+    $out = zsm_exec(['/sbin/zfs','list','-H','-t','snapshot','-o','name','-r',$dataset], $rc);
+    if ($rc !== 0 || $out === '') return [];
+    $suffix = '@' . $snap;
+    $rows = [];
+    foreach (explode("\n", $out) as $name) {
+        $name = trim($name);
+        if (str_ends_with($name, $suffix) && zsm_valid_snapshot($name)) $rows[] = $name;
+    }
+    return $rows;
 }
 
 function zsm_is_held(string $snapshot): bool
 {
-    $out = zsm_exec(['/sbin/zfs', 'holds', '-H', $snapshot], $rc);
+    $out = zsm_exec(['/sbin/zfs','holds','-H',$snapshot], $rc);
     if ($rc !== 0 || $out === '') return false;
     foreach (explode("\n", $out) as $line) {
         $p = preg_split('/\s+/', trim($line));
@@ -117,71 +121,91 @@ function zsm_is_held(string $snapshot): bool
 
 function zsm_create_snapshot(string $dataset, string $snap, bool $recursive=false, string $source='manual', string $policy=''): array
 {
-    if (!zsm_valid_dataset($dataset) || !zsm_valid_snapshot_name($snap)) return [false, 'Invalid dataset or snapshot name'];
+    if (!zsm_valid_dataset($dataset) || !zsm_valid_snapshot_name($snap)) return [false,'Invalid dataset or snapshot name'];
     $full = $dataset . '@' . $snap;
-    $args = ['/sbin/zfs', 'snapshot'];
+    $args = ['/sbin/zfs','snapshot'];
     if ($recursive) $args[] = '-r';
     $args[] = $full;
     $out = zsm_exec($args, $rc);
-    if ($rc !== 0) return [false, $out ?: 'zfs snapshot failed'];
-    zsm_set_metadata($full, $source, $policy);
+    if ($rc !== 0) return [false,$out ?: 'zfs snapshot failed'];
+    if ($recursive) {
+        foreach (zsm_recursive_generation($dataset, $snap) as $created) zsm_set_metadata($created, $source, $policy);
+    } else {
+        zsm_set_metadata($full, $source, $policy);
+    }
     zsm_log("CREATE $full" . ($recursive ? ' recursive' : ''));
-    return [true, $full];
+    return [true,$full];
 }
 
 function zsm_delete_snapshot(string $snapshot): array
 {
-    if (!zsm_valid_snapshot($snapshot)) return [false, 'Invalid snapshot'];
-    if (zsm_is_held($snapshot)) return [false, 'Snapshot is protected by hold'];
-    $out = zsm_exec(['/sbin/zfs', 'destroy', $snapshot], $rc);
-    if ($rc !== 0) return [false, $out ?: 'zfs destroy failed'];
+    if (!zsm_valid_snapshot($snapshot)) return [false,'Invalid snapshot'];
+    if (zsm_is_held($snapshot)) return [false,'Snapshot is protected by hold'];
+    $out = zsm_exec(['/sbin/zfs','destroy',$snapshot], $rc);
+    if ($rc !== 0) return [false,$out ?: 'zfs destroy failed'];
     zsm_log("DELETE $snapshot");
-    return [true, $snapshot];
+    return [true,$snapshot];
+}
+
+function zsm_delete_managed_generation(string $dataset, string $snap, string $policy): array
+{
+    $generation = zsm_recursive_generation($dataset, $snap);
+    $managed = [];
+    foreach ($generation as $item) {
+        if (zsm_get_prop($item, ZSM_MANAGED_PROP) !== '1') continue;
+        if (zsm_get_prop($item, ZSM_POLICY_PROP) !== $policy) continue;
+        if (zsm_is_held($item)) return [false,'Generation contains protected snapshot: ' . $item];
+        $managed[] = $item;
+    }
+    usort($managed, fn($a,$b)=>substr_count($b,'/') <=> substr_count($a,'/'));
+    foreach ($managed as $item) {
+        [$ok,$msg] = zsm_delete_snapshot($item);
+        if (!$ok) return [false,$msg];
+    }
+    return [true,$dataset . '@' . $snap];
 }
 
 function zsm_hold(string $snapshot, bool $enable): array
 {
-    if (!zsm_valid_snapshot($snapshot)) return [false, 'Invalid snapshot'];
-    $args = $enable ? ['/sbin/zfs', 'hold', ZSM_HOLD_TAG, $snapshot] : ['/sbin/zfs', 'release', ZSM_HOLD_TAG, $snapshot];
+    if (!zsm_valid_snapshot($snapshot)) return [false,'Invalid snapshot'];
+    $args = $enable ? ['/sbin/zfs','hold',ZSM_HOLD_TAG,$snapshot] : ['/sbin/zfs','release',ZSM_HOLD_TAG,$snapshot];
     $out = zsm_exec($args, $rc);
-    if ($rc !== 0) return [false, $out ?: 'hold/release failed'];
+    if ($rc !== 0) return [false,$out ?: 'hold/release failed'];
     zsm_log(($enable ? 'HOLD ' : 'RELEASE ') . $snapshot);
-    return [true, $snapshot];
+    return [true,$snapshot];
 }
 
 function zsm_clone(string $snapshot, string $clone): array
 {
-    if (!zsm_valid_snapshot($snapshot) || !zsm_valid_dataset($clone)) return [false, 'Invalid snapshot or clone name'];
-    $out = zsm_exec(['/sbin/zfs', 'clone', $snapshot, $clone], $rc);
-    if ($rc !== 0) return [false, $out ?: 'zfs clone failed'];
+    if (!zsm_valid_snapshot($snapshot) || !zsm_valid_dataset($clone)) return [false,'Invalid snapshot or clone name'];
+    $out = zsm_exec(['/sbin/zfs','clone',$snapshot,$clone], $rc);
+    if ($rc !== 0) return [false,$out ?: 'zfs clone failed'];
     zsm_log("CLONE $snapshot -> $clone");
-    return [true, $clone];
+    return [true,$clone];
 }
 
 function zsm_safe_rollback(string $snapshot): array
 {
-    if (!zsm_valid_snapshot($snapshot)) return [false, 'Invalid snapshot'];
+    if (!zsm_valid_snapshot($snapshot)) return [false,'Invalid snapshot'];
     [$dataset] = explode('@', $snapshot, 2);
-    $out = zsm_exec(['/sbin/zfs', 'list', '-H', '-p', '-t', 'snapshot', '-o', 'name', '-S', 'creation', '-d', '1', $dataset], $rc);
-    if ($rc !== 0) return [false, $out ?: 'Unable to inspect snapshots'];
+    $out = zsm_exec(['/sbin/zfs','list','-H','-p','-t','snapshot','-o','name','-S','creation','-d','1',$dataset], $rc);
+    if ($rc !== 0) return [false,$out ?: 'Unable to inspect snapshots'];
     $newest = trim(explode("\n", $out)[0] ?? '');
-    if ($newest !== $snapshot) return [false, 'Safety guard: rollback is only allowed to the newest snapshot'];
-    $out = zsm_exec(['/sbin/zfs', 'rollback', $snapshot], $rc);
-    if ($rc !== 0) return [false, $out ?: 'zfs rollback failed'];
+    if ($newest !== $snapshot) return [false,'Safety guard: rollback is only allowed to the newest snapshot'];
+    $out = zsm_exec(['/sbin/zfs','rollback',$snapshot], $rc);
+    if ($rc !== 0) return [false,$out ?: 'zfs rollback failed'];
     zsm_log("ROLLBACK $snapshot");
-    return [true, $snapshot];
+    return [true,$snapshot];
 }
 
 function zsm_browse_url(string $snapshot): ?string
 {
     if (!zsm_valid_snapshot($snapshot)) return null;
     [$dataset, $snap] = explode('@', $snapshot, 2);
-    $type = zsm_get_prop($dataset, 'type');
-    if ($type === 'volume') return null;
+    if (zsm_get_prop($dataset, 'type') === 'volume') return null;
     $mountpoint = zsm_get_prop($dataset, 'mountpoint');
     if ($mountpoint === '-' || $mountpoint === 'none' || $mountpoint === 'legacy' || $mountpoint === '') return null;
-    $path = rtrim($mountpoint, '/') . '/.zfs/snapshot/' . $snap;
-    return '/Shares/Browse?dir=' . rawurlencode($path);
+    return '/Shares/Browse?dir=' . rawurlencode(rtrim($mountpoint, '/') . '/.zfs/snapshot/' . $snap);
 }
 
 function zsm_load_schedules(): array
@@ -208,7 +232,7 @@ function zsm_regenerate_cron(?array $rows=null): void
 {
     $rows ??= zsm_load_schedules();
     $cronFile = ZSM_CONFIG_DIR . '/zsnapshot-manager.cron';
-    $lines = ["# Generated by ZFS Snapshot Manager"];
+    $lines = ['# Generated by ZFS Snapshot Manager'];
     foreach ($rows as $row) {
         if (empty($row['enabled']) || empty($row['id']) || !zsm_valid_cron((string)($row['cron'] ?? ''))) continue;
         $id = preg_replace('/[^a-f0-9-]/i', '', (string)$row['id']);
@@ -222,7 +246,7 @@ function zsm_notify(string $subject, string $description, string $importance='no
 {
     $notify = '/usr/local/emhttp/webGui/scripts/notify';
     if (!is_executable($notify)) return;
-    zsm_exec([$notify, '-e', 'ZFS Snapshot Manager', '-s', $subject, '-d', $description, '-i', $importance], $rc);
+    zsm_exec([$notify,'-e','ZFS Snapshot Manager','-s',$subject,'-d',$description,'-i',$importance], $rc);
 }
 
 zsm_init();
