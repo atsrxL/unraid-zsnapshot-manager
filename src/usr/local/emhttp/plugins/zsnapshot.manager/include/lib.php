@@ -249,4 +249,32 @@ function zsm_notify(string $subject, string $description, string $importance='no
     zsm_exec([$notify,'-e','ZFS Snapshot Manager','-s',$subject,'-d',$description,'-i',$importance], $rc);
 }
 
+function zsm_csrf_token(): string
+{
+    $v = @parse_ini_file('/var/local/emhttp/var.ini');
+    return is_array($v) ? (string)($v['csrf_token'] ?? '') : '';
+}
+
+function zsm_csrf_guard(): void
+{
+    if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') return;
+    $expected = zsm_csrf_token();
+    $received = (string)($_POST['csrf_token'] ?? '');
+    if ($expected === '' || !hash_equals($expected, $received)) {
+        http_response_code(403);
+        die('Security token validation failed. Refresh the page and try again.');
+    }
+}
+
+function zsm_inject_csrf(): void
+{
+    if (PHP_SAPI === 'cli') return;
+    $token = json_encode(zsm_csrf_token(), JSON_HEX_TAG|JSON_HEX_AMP|JSON_HEX_APOS|JSON_HEX_QUOT);
+    echo '<script>(function(){var t=' . $token . ';document.querySelectorAll("form[method=post],form[method=POST]").forEach(function(f){if(!f.querySelector("input[name=csrf_token]")){var i=document.createElement("input");i.type="hidden";i.name="csrf_token";i.value=t;f.appendChild(i);}});})();</script>';
+}
+
 zsm_init();
+if (PHP_SAPI !== 'cli') {
+    zsm_csrf_guard();
+    register_shutdown_function('zsm_inject_csrf');
+}
