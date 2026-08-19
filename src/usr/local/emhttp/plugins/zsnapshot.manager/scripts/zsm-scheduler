@@ -1,0 +1,51 @@
+#!/usr/bin/php
+<?php
+
+declare(strict_types=1);
+require_once __DIR__ . '/../include/lib.php';
+
+$id = (string)($argv[1] ?? '');
+if ($id === '') exit(2);
+$policy = null;
+foreach (zsm_load_schedules() as $row) {
+    if (($row['id'] ?? '') === $id) { $policy = $row; break; }
+}
+if (!$policy || empty($policy['enabled'])) exit(0);
+$target = (string)($policy['target'] ?? '');
+if (!zsm_valid_dataset($target)) {
+    zsm_log("SCHEDULE $id invalid target");
+    exit(2);
+}
+$name = 'zsm-' . substr(preg_replace('/[^a-f0-9]/i', '', $id), 0, 8) . '-' . date('Ymd-His');
+[$ok, $msg] = zsm_create_snapshot($target, $name, !empty($policy['recursive']), 'schedule', $id);
+if (!$ok) {
+    zsm_log("SCHEDULE $id failed: $msg");
+    zsm_notify('Scheduled snapshot failed', $target . ': ' . $msg, 'alert');
+    exit(1);
+}
+
+$keep = max(1, min(10000, (int)($policy['keep'] ?? 24)));
+$out = zsm_exec(['/sbin/zfs', 'list', '-H', '-p', '-t', 'snapshot', '-o', 'name', '-S', 'creation', '-d', '1', $target], $rc);
+if ($rc === 0 && $out !== '') {
+    $managed = [];
+    foreach (explode("\n", trim($out)) as $snap) {
+        if (!zsm_valid_snapshot($snap)) continue;
+        if (zsm_get_prop($snap, ZSM_MANAGED_PROP) !== '1') continue;
+        if (zsm_get_prop($snap, ZSM_POLICY_PROP) !== $id) continue;
+        $managed[] = $snap;
+    }
+    foreach (array_slice($managed, $keep) as $old) {
+        if (zsm_is_held($old)) {
+            zsm_log("RETENTION skip held $old");
+            continue;
+        }
+        [$deleted, $reason] = zsm_delete_snapshot($old);
+        if (!$deleted) zsm_log("RETENTION failed $old: $reason");
+    }
+}
+
+zsm_log("SCHEDULE $id completed: $msg");
+if (($policy['notify'] ?? 'failure') === 'always') {
+    zsm_notify('Scheduled snapshot created', $msg, 'normal');
+}
+exit(0);
