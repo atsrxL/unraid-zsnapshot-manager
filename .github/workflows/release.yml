@@ -1,0 +1,97 @@
+name: Validate and Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  validate-and-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate PHP and shell syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          root='src/usr/local/emhttp/plugins/zsnapshot.manager'
+          php -l "$root/include/lib.php"
+          php -l "$root/action.php"
+          php -l "$root/schedule-action.php"
+          php -l "$root/scripts/zsm-policy-manager"
+          php -l "$root/scripts/zsm-scheduler"
+          php -l "$root/scripts/zsm-settings-manager"
+          bash -n "$root/scripts/zsm-manager.sh"
+          for page in "$root"/*.page; do
+            if grep -q '^---$' "$page"; then
+              awk 'found { print } /^---$/ { found=1 }' "$page" > /tmp/zsm-page.php
+              php -l /tmp/zsm-page.php
+            fi
+          done
+
+      - name: Validate plugin manifest files
+        shell: bash
+        run: |
+          set -euo pipefail
+          root='src/usr/local/emhttp/plugins/zsnapshot.manager'
+          test -f plugin/zsnapshot.manager.plg
+          for file in \
+            include/lib.php \
+            scripts/zsm-manager.sh \
+            scripts/zsm-scheduler \
+            scripts/zsm-policy-manager \
+            scripts/zsm-settings-manager \
+            ZFS-Snapshot-Manager.page \
+            ZFS-Status.page \
+            ZFS-Snapshots.page \
+            ZFS-Schedules.page \
+            ZFS-Settings.page; do
+            test -f "$root/$file"
+          done
+          version="$(sed -n 's/.*<!ENTITY version "\([^"]*\)">.*/\1/p' plugin/zsnapshot.manager.plg | head -n1)"
+          test -n "$version"
+          grep -F "echo \"ZFS Snapshot Manager $version installed\"" plugin/zsnapshot.manager.plg >/dev/null
+
+      - name: Create GitHub release
+        if: github.event_name == 'workflow_dispatch' || startsWith(github.event.head_commit.message, 'release:')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(sed -n 's/.*<!ENTITY version "\([^"]*\)">.*/\1/p' plugin/zsnapshot.manager.plg | head -n1)"
+          test -n "$version"
+          git fetch --tags --force
+          if git rev-parse "refs/tags/$version" >/dev/null 2>&1; then
+            tagged="$(git rev-list -n1 "$version")"
+            if [[ "$tagged" != "$GITHUB_SHA" ]]; then
+              echo "Tag $version already points to $tagged instead of $GITHUB_SHA" >&2
+              exit 1
+            fi
+          else
+            git tag "$version" "$GITHUB_SHA"
+            git push origin "$version"
+          fi
+          awk -v v="$version" '
+            $0 == "### " v { found=1; next }
+            found && /^### / { exit }
+            found { print }
+          ' plugin/zsnapshot.manager.plg > /tmp/release-notes.md
+          if [[ ! -s /tmp/release-notes.md ]]; then
+            printf 'ZFS Snapshot Manager %s\n' "$version" > /tmp/release-notes.md
+          fi
+          if gh release view "$version" >/dev/null 2>&1; then
+            echo "Release $version already exists"
+          else
+            gh release create "$version" \
+              plugin/zsnapshot.manager.plg#zsnapshot.manager.plg \
+              --title "ZFS Snapshot Manager $version" \
+              --notes-file /tmp/release-notes.md
+          fi
