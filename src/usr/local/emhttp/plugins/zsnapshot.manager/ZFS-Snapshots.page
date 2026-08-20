@@ -5,39 +5,14 @@ Tag="camera"
 <?php
 require_once '/usr/local/emhttp/plugins/zsnapshot.manager/include/lib.php';
 
-global $var;
-$csrf = (string)($var['csrf_token'] ?? '');
-$message = '';
-$error = '';
-
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $action = (string)($_POST['action'] ?? '');
-    if ($action === 'create') {
-        [$ok,$msg] = zsm_create_snapshot((string)($_POST['dataset'] ?? ''), (string)($_POST['snapname'] ?? ''), !empty($_POST['recursive']));
-    } elseif ($action === 'delete') {
-        [$ok,$msg] = zsm_delete_snapshot((string)($_POST['snapshot'] ?? ''));
-    } elseif ($action === 'hold') {
-        [$ok,$msg] = zsm_hold((string)($_POST['snapshot'] ?? ''), true);
-    } elseif ($action === 'release') {
-        [$ok,$msg] = zsm_hold((string)($_POST['snapshot'] ?? ''), false);
-    } elseif ($action === 'clone') {
-        [$ok,$msg] = zsm_clone((string)($_POST['snapshot'] ?? ''), (string)($_POST['clone'] ?? ''));
-    } elseif ($action === 'rollback') {
-        [$ok,$msg] = zsm_safe_rollback((string)($_POST['snapshot'] ?? ''));
-    } else {
-        $ok = false;
-        $msg = 'Unknown action';
-    }
-    if ($ok) $message = $msg; else $error = $msg;
-}
-
+$csrf = zsm_csrf_token();
 function zsm_h($v){ return htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8'); }
 function zsm_bytes($n){
     $u=['B','KiB','MiB','GiB','TiB','PiB']; $i=0; $n=(float)$n;
     while($n>=1024 && $i<count($u)-1){$n/=1024;$i++;}
     return ($i===0 ? (string)(int)$n : number_format($n,2)) . ' ' . $u[$i];
 }
-function zsm_csrf($token){ return '<input type="hidden" name="csrf_token" value="'.zsm_h($token).'">'; }
+function zsm_csrf_input($token){ return '<input type="hidden" name="csrf_token" value="'.zsm_h($token).'">'; }
 
 $datasets = zsm_datasets();
 $snapshots = zsm_snapshots();
@@ -48,11 +23,10 @@ foreach($snapshots as $s) $byDataset[$s['dataset']][]=$s;
 .zsm-card{border:1px solid #ccc;border-radius:5px;margin:12px 0;background:rgba(127,127,127,.04)}
 .zsm-head{display:flex;justify-content:space-between;align-items:center;padding:12px 14px;cursor:pointer}.zsm-title{font-size:17px;font-weight:600}.zsm-meta{opacity:.75;font-size:12px}
 .zsm-body{padding:0 14px 14px}.zsm-table{width:100%;border-collapse:collapse}.zsm-table th,.zsm-table td{padding:7px 6px;border-bottom:1px solid #ddd;text-align:left}.zsm-actions{white-space:nowrap}.zsm-actions form{display:inline-block;margin:0 3px 3px 0}
-.zsm-ok{background:#e8f7e8;padding:8px 10px;margin:8px 0}.zsm-err{background:#ffe7e7;padding:8px 10px;margin:8px 0}.zsm-badge{display:inline-block;padding:2px 6px;border-radius:9px;background:#ddd;font-size:11px}.zsm-lock{font-weight:bold}
-.zsm-create{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:8px 0 14px}.zsm-create input[type=text]{min-width:230px}
+.zsm-badge{display:inline-block;padding:2px 6px;border-radius:9px;background:#ddd;font-size:11px}.zsm-lock{font-weight:bold}
+.zsm-create{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:8px 0 14px}.zsm-create input[type=text]{min-width:230px}.zsm-status{display:none;padding:9px 11px;margin:8px 0;border-radius:4px}.zsm-status.ok{display:block;background:#e8f7e8}.zsm-status.err{display:block;background:#ffe7e7}
 </style>
-<?php if($message): ?><div class="zsm-ok"><?=zsm_h($message)?></div><?php endif; ?>
-<?php if($error): ?><div class="zsm-err"><?=zsm_h($error)?></div><?php endif; ?>
+<div id="zsm-status" class="zsm-status"></div>
 
 <?php if(!$datasets): ?>
 <p>No ZFS filesystems or volumes were found. Verify that the pool is imported and <code>zfs list</code> works.</p>
@@ -65,8 +39,8 @@ foreach($snapshots as $s) $byDataset[$s['dataset']][]=$s;
   <span class="zsm-meta"><?=count($snaps)?> snapshots · Used <?=zsm_bytes($d['used'])?> · Free <?=zsm_bytes($d['available'])?> · <?=zsm_h($d['mountpoint'])?></span>
 </summary>
 <div class="zsm-body">
-<form method="post" class="zsm-create">
-<?=zsm_csrf($csrf)?>
+<form method="post" class="zsm-create zsm-action-form">
+<?=zsm_csrf_input($csrf)?>
 <input type="hidden" name="action" value="create"><input type="hidden" name="dataset" value="<?=zsm_h($d['name'])?>">
 <input type="text" name="snapname" value="manual-<?=date('Ymd-His')?>" required pattern="[A-Za-z0-9_.:-]+">
 <label><input type="checkbox" name="recursive" value="1"> Recursive</label>
@@ -81,10 +55,10 @@ foreach($snapshots as $s) $byDataset[$s['dataset']][]=$s;
 <td class="zsm-lock"><?=$s['held'] ? '🔒 Yes' : 'No'?></td>
 <td class="zsm-actions">
 <?php if($browse): ?><a class="button" href="<?=zsm_h($browse)?>">Browse</a><?php endif; ?>
-<form method="post"><?=zsm_csrf($csrf)?><input type="hidden" name="action" value="<?=$s['held']?'release':'hold'?>"><input type="hidden" name="snapshot" value="<?=zsm_h($s['name'])?>"><button type="submit"><?=$s['held']?'Unlock':'Lock'?></button></form>
-<form method="post" onsubmit="var n=prompt('Clone dataset name:','<?=zsm_h($s['dataset'])?>-clone');if(!n)return false;this.clone.value=n;"><?=zsm_csrf($csrf)?><input type="hidden" name="action" value="clone"><input type="hidden" name="snapshot" value="<?=zsm_h($s['name'])?>"><input type="hidden" name="clone" value=""><button type="submit">Clone</button></form>
-<form method="post" onsubmit="return confirm('Rollback to this snapshot? Only the newest snapshot is allowed. Data written after it will be lost.');"><?=zsm_csrf($csrf)?><input type="hidden" name="action" value="rollback"><input type="hidden" name="snapshot" value="<?=zsm_h($s['name'])?>"><button type="submit">Rollback</button></form>
-<form method="post" onsubmit="return confirm('Delete snapshot <?=zsm_h($s['name'])?>? This does not use -R and will fail safely if ZFS dependencies exist.');"><?=zsm_csrf($csrf)?><input type="hidden" name="action" value="delete"><input type="hidden" name="snapshot" value="<?=zsm_h($s['name'])?>"><button type="submit" <?=$s['held']?'disabled':''?>>Delete</button></form>
+<form method="post" class="zsm-action-form"><?=zsm_csrf_input($csrf)?><input type="hidden" name="action" value="<?=$s['held']?'release':'hold'?>"><input type="hidden" name="snapshot" value="<?=zsm_h($s['name'])?>"><button type="submit"><?=$s['held']?'Unlock':'Lock'?></button></form>
+<form method="post" class="zsm-action-form zsm-clone-form"><?=zsm_csrf_input($csrf)?><input type="hidden" name="action" value="clone"><input type="hidden" name="snapshot" value="<?=zsm_h($s['name'])?>"><input type="hidden" name="clone" value=""><input type="hidden" name="clone_default" value="<?=zsm_h($s['dataset'])?>-clone"><button type="submit">Clone</button></form>
+<form method="post" class="zsm-action-form" data-confirm="Rollback to this snapshot? Only the newest snapshot is allowed. Data written after it will be lost."><?=zsm_csrf_input($csrf)?><input type="hidden" name="action" value="rollback"><input type="hidden" name="snapshot" value="<?=zsm_h($s['name'])?>"><button type="submit">Rollback</button></form>
+<form method="post" class="zsm-action-form" data-confirm="Delete snapshot <?=zsm_h($s['name'])?>? This does not use -R and will fail safely if ZFS dependencies exist."><?=zsm_csrf_input($csrf)?><input type="hidden" name="action" value="delete"><input type="hidden" name="snapshot" value="<?=zsm_h($s['name'])?>"><button type="submit" <?=$s['held']?'disabled':''?>>Delete</button></form>
 </td></tr>
 <?php endforeach; ?>
 </tbody></table>
@@ -95,3 +69,49 @@ foreach($snapshots as $s) $byDataset[$s['dataset']][]=$s;
 <pre style="max-height:220px;overflow:auto"><?php
 $log=@file(ZSM_LOG, FILE_IGNORE_NEW_LINES); if(!$log){echo "No activity yet.";} else {foreach(array_slice($log,-80) as $line) echo zsm_h($line)."\n";}
 ?></pre>
+
+<script>
+(function(){
+  function status(text, ok) {
+    var el = document.getElementById('zsm-status');
+    el.textContent = text;
+    el.className = 'zsm-status ' + (ok ? 'ok' : 'err');
+    el.scrollIntoView({behavior:'smooth', block:'nearest'});
+  }
+
+  document.querySelectorAll('.zsm-action-form').forEach(function(form){
+    form.addEventListener('submit', async function(ev){
+      ev.preventDefault();
+
+      var confirmText = form.getAttribute('data-confirm');
+      if (confirmText && !window.confirm(confirmText)) return;
+
+      if (form.classList.contains('zsm-clone-form')) {
+        var def = form.querySelector('input[name=clone_default]').value;
+        var clone = window.prompt('Clone dataset name:', def);
+        if (!clone) return;
+        form.querySelector('input[name=clone]').value = clone;
+      }
+
+      var button = form.querySelector('button[type=submit]');
+      if (button) button.disabled = true;
+      try {
+        var response = await fetch('/plugins/zsnapshot.manager/action.php', {
+          method: 'POST',
+          body: new FormData(form),
+          credentials: 'same-origin'
+        });
+        var text = await response.text();
+        var data;
+        try { data = JSON.parse(text); } catch(e) { throw new Error(text || ('HTTP ' + response.status)); }
+        if (!response.ok || !data.ok) throw new Error(data.message || 'Operation failed');
+        status(data.message || 'Operation completed', true);
+        window.setTimeout(function(){ location.reload(); }, 350);
+      } catch (e) {
+        status(e.message || String(e), false);
+        if (button) button.disabled = false;
+      }
+    });
+  });
+})();
+</script>
