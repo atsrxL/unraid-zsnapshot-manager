@@ -6,74 +6,23 @@ Tag="clock-o"
 require_once '/usr/local/emhttp/plugins/zsnapshot.manager/include/lib.php';
 
 $csrf = zsm_csrf_token();
-function zsm_h2($v){ return htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8'); }
+function zsm_h2($v){ return htmlspecialchars((string)$v, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); }
 function zsm_csrf2($token){ return '<input type="hidden" name="csrf_token" value="'.zsm_h2($token).'">'; }
 
-$message=''; $error='';
-$schedules=zsm_load_schedules();
-
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $action=(string)($_POST['action'] ?? '');
-    if ($action==='add') {
-        $target=trim((string)($_POST['target'] ?? ''));
-        $cron=trim((string)($_POST['cron'] ?? ''));
-        $retention=zsm_retention_counts([
-            'hourly'=>(int)($_POST['retention_hourly'] ?? 24),
-            'daily'=>(int)($_POST['retention_daily'] ?? 7),
-            'monthly'=>(int)($_POST['retention_monthly'] ?? 12),
-            'yearly'=>(int)($_POST['retention_yearly'] ?? 3),
-        ]);
-
-        if (!zsm_valid_dataset($target)) $error='Invalid target dataset/zvol';
-        elseif (!zsm_valid_cron($cron)) $error='Invalid cron expression (5 fields required)';
-        else {
-            $id=bin2hex(random_bytes(8));
-            $schedules[]=[
-                'id'=>$id,
-                'name'=>trim((string)($_POST['name'] ?? 'Policy')) ?: 'Policy',
-                'target'=>$target,
-                'cron'=>$cron,
-                'retention_mode'=>'smart',
-                'retention'=>$retention,
-                'recursive'=>!empty($_POST['recursive']),
-                'enabled'=>true,
-                'notify'=>(($_POST['notify'] ?? 'failure')==='always' ? 'always' : 'failure')
-            ];
-            if (zsm_save_schedules($schedules)) $message='Schedule created'; else $error='Failed to save schedules';
-        }
-    } elseif ($action==='delete') {
-        $id=(string)($_POST['id'] ?? '');
-        $schedules=array_values(array_filter($schedules, fn($r)=>($r['id'] ?? '')!==$id));
-        if (zsm_save_schedules($schedules)) $message='Schedule deleted'; else $error='Failed to save schedules';
-    } elseif ($action==='toggle') {
-        $id=(string)($_POST['id'] ?? '');
-        foreach($schedules as &$r) if(($r['id'] ?? '')===$id) $r['enabled']=empty($r['enabled']);
-        unset($r);
-        if (zsm_save_schedules($schedules)) $message='Schedule updated'; else $error='Failed to save schedules';
-    } elseif ($action==='run') {
-        $id=preg_replace('/[^a-f0-9]/i','',(string)($_POST['id'] ?? ''));
-        if($id==='') $error='Invalid policy id';
-        else {
-            $cmd='/usr/local/emhttp/plugins/zsnapshot.manager/scripts/zsm-scheduler ' . escapeshellarg($id) . ' 2>&1';
-            exec($cmd,$out,$rc);
-            if($rc===0) $message='Policy executed successfully'; else $error=trim(implode("\n",$out)) ?: 'Policy execution failed';
-        }
-    }
-    $schedules=zsm_load_schedules();
-}
-$datasets=zsm_datasets();
+$schedules = zsm_load_schedules();
+$datasets = zsm_datasets();
 ?>
 <style>
 .zsm-card{border:1px solid #ccc;border-radius:5px;padding:14px;margin:12px 0;background:rgba(127,127,127,.04)}
-.zsm-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}.zsm-table{width:100%;border-collapse:collapse}.zsm-table th,.zsm-table td{padding:8px 6px;border-bottom:1px solid #ddd;text-align:left}.zsm-actions form{display:inline-block;margin-right:4px}.zsm-ok{background:#e8f7e8;padding:8px 10px}.zsm-err{background:#ffe7e7;padding:8px 10px}
-.zsm-wizard{margin-top:12px;padding-top:12px;border-top:1px solid #ccc}.zsm-mode-fields{display:none}.zsm-mode-fields.active{display:block}.zsm-preview{display:inline-block;padding:7px 10px;border-radius:4px;background:rgba(127,127,127,.12);font-size:14px}.zsm-help{opacity:.75}.zsm-full{grid-column:1/-1}.zsm-retention{display:grid;grid-template-columns:repeat(4,minmax(130px,1fr));gap:10px}.zsm-retention input{width:100px}@media(max-width:800px){.zsm-retention{grid-template-columns:repeat(2,minmax(130px,1fr))}}
+.zsm-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}.zsm-table{width:100%;border-collapse:collapse}.zsm-table th,.zsm-table td{padding:8px 6px;border-bottom:1px solid #ddd;text-align:left}.zsm-actions form{display:inline-block;margin-right:4px}
+.zsm-wizard{margin-top:12px;padding-top:12px;border-top:1px solid #ccc}.zsm-mode-fields{display:none}.zsm-mode-fields.active{display:block}.zsm-preview{display:inline-block;padding:7px 10px;border-radius:4px;background:rgba(127,127,127,.12);font-size:14px}.zsm-help{opacity:.75}.zsm-full{grid-column:1/-1}.zsm-retention{display:grid;grid-template-columns:repeat(4,minmax(130px,1fr));gap:10px}.zsm-retention input{width:100px}.zsm-status{display:none;padding:9px 11px;margin:8px 0;border-radius:4px;white-space:pre-wrap}.zsm-status.ok{display:block;background:#e8f7e8}.zsm-status.err{display:block;background:#ffe7e7}.zsm-status.busy{display:block;background:rgba(127,127,127,.12)}
+@media(max-width:800px){.zsm-retention{grid-template-columns:repeat(2,minmax(130px,1fr))}}
 </style>
-<?php if($message): ?><div class="zsm-ok"><?=zsm_h2($message)?></div><?php endif; ?>
-<?php if($error): ?><div class="zsm-err"><?=zsm_h2($error)?></div><?php endif; ?>
+<div id="zsm-schedule-status" class="zsm-status"></div>
 
 <div class="zsm-card">
 <h3>Create snapshot policy</h3>
-<form method="post" id="zsm-policy-form" onsubmit="return zsmBuildCron();">
+<form method="post" id="zsm-policy-form" class="zsm-schedule-action">
 <?=zsm_csrf2($csrf)?>
 <input type="hidden" name="action" value="add">
 <input type="hidden" name="cron" id="zsm-cron-value" value="0 3 * * *">
@@ -88,7 +37,7 @@ $datasets=zsm_datasets();
 <h4>Schedule</h4>
 <div class="zsm-grid">
 <label>Frequency<br>
-<select id="zsm-mode" onchange="zsmScheduleModeChanged()">
+<select id="zsm-mode">
 <option value="daily" selected>Daily</option>
 <option value="minutes">Every N minutes</option>
 <option value="hourly">Hourly</option>
@@ -96,14 +45,12 @@ $datasets=zsm_datasets();
 <option value="monthly">Monthly</option>
 <option value="custom">Custom cron</option>
 </select></label>
-
 <div class="zsm-mode-fields" data-mode="minutes"><label>Interval<br><select id="zsm-minutes"><option>5</option><option>10</option><option selected>15</option><option>20</option><option>30</option></select> minutes</label></div>
 <div class="zsm-mode-fields" data-mode="hourly"><label>At minute<br><input id="zsm-hourly-minute" type="number" min="0" max="59" value="0"></label></div>
 <div class="zsm-mode-fields active" data-mode="daily"><label>Time<br><input id="zsm-daily-time" type="time" value="03:00"></label></div>
 <div class="zsm-mode-fields" data-mode="weekly"><label>Day<br><select id="zsm-weekday"><option value="1">Monday</option><option value="2">Tuesday</option><option value="3">Wednesday</option><option value="4">Thursday</option><option value="5">Friday</option><option value="6">Saturday</option><option value="0" selected>Sunday</option></select></label><br><label>Time<br><input id="zsm-weekly-time" type="time" value="03:00"></label></div>
 <div class="zsm-mode-fields" data-mode="monthly"><label>Day of month<br><input id="zsm-monthday" type="number" min="1" max="31" value="1"></label><br><label>Time<br><input id="zsm-monthly-time" type="time" value="03:00"></label></div>
 <div class="zsm-mode-fields" data-mode="custom"><label>Custom cron<br><input id="zsm-custom-cron" type="text" value="0 3 * * *" placeholder="minute hour day month weekday"></label></div>
-
 <div class="zsm-full"><strong>Cron preview:</strong> <code id="zsm-cron-preview" class="zsm-preview">0 3 * * *</code><br><small class="zsm-help">Uses the Unraid server timezone. The saved policy stores and displays the standard 5-field cron expression.</small></div>
 </div>
 </div>
@@ -118,7 +65,6 @@ $datasets=zsm_datasets();
 </div>
 <p class="zsm-help">The newest snapshot from each hour/day/month/year bucket is retained. A snapshot selected by more than one tier is stored only once. Set a tier to 0 to disable it. Protected snapshots are never auto-deleted.</p>
 </div>
-
 <p><button type="submit">Create policy</button></p>
 </form>
 </div>
@@ -134,9 +80,9 @@ $datasets=zsm_datasets();
 <td><?php if($smart): ?>H <?= $ret['hourly'] ?> · D <?= $ret['daily'] ?> · M <?= $ret['monthly'] ?> · Y <?= $ret['yearly'] ?><?php else: ?>Keep <?= (int)($r['keep'] ?? 24) ?> latest<?php endif; ?></td>
 <td><?=!empty($r['recursive'])?'Yes':'No'?></td><td><?=!empty($r['enabled'])?'Enabled':'Disabled'?></td>
 <td class="zsm-actions">
-<form method="post"><?=zsm_csrf2($csrf)?><input type="hidden" name="action" value="run"><input type="hidden" name="id" value="<?=zsm_h2($r['id'] ?? '')?>"><button type="submit">Run now</button></form>
-<form method="post"><?=zsm_csrf2($csrf)?><input type="hidden" name="action" value="toggle"><input type="hidden" name="id" value="<?=zsm_h2($r['id'] ?? '')?>"><button type="submit"><?=!empty($r['enabled'])?'Disable':'Enable'?></button></form>
-<form method="post" onsubmit="return confirm('Delete this schedule? Existing snapshots are not deleted.');"><?=zsm_csrf2($csrf)?><input type="hidden" name="action" value="delete"><input type="hidden" name="id" value="<?=zsm_h2($r['id'] ?? '')?>"><button type="submit">Delete</button></form>
+<form method="post" class="zsm-schedule-action"><?=zsm_csrf2($csrf)?><input type="hidden" name="action" value="run"><input type="hidden" name="id" value="<?=zsm_h2($r['id'] ?? '')?>"><button type="submit">Run now</button></form>
+<form method="post" class="zsm-schedule-action"><?=zsm_csrf2($csrf)?><input type="hidden" name="action" value="toggle"><input type="hidden" name="id" value="<?=zsm_h2($r['id'] ?? '')?>"><button type="submit"><?=!empty($r['enabled'])?'Disable':'Enable'?></button></form>
+<form method="post" class="zsm-schedule-action" data-confirm="Delete this schedule? Existing snapshots are not deleted."><?=zsm_csrf2($csrf)?><input type="hidden" name="action" value="delete"><input type="hidden" name="id" value="<?=zsm_h2($r['id'] ?? '')?>"><button type="submit">Delete</button></form>
 </td></tr>
 <?php endforeach; ?></tbody></table>
 
@@ -159,12 +105,9 @@ function zsmBuildCron() {
     var minute = Math.max(0, Math.min(59, parseInt(document.getElementById('zsm-hourly-minute').value,10) || 0));
     cron = minute + ' * * * *';
   } else if (mode === 'daily') {
-    var t = zsmTimeParts('zsm-daily-time');
-    cron = t.m + ' ' + t.h + ' * * *';
+    var t = zsmTimeParts('zsm-daily-time'); cron = t.m + ' ' + t.h + ' * * *';
   } else if (mode === 'weekly') {
-    var w = zsmTimeParts('zsm-weekly-time');
-    var dow = document.getElementById('zsm-weekday').value;
-    cron = w.m + ' ' + w.h + ' * * ' + dow;
+    var w = zsmTimeParts('zsm-weekly-time'); cron = w.m + ' ' + w.h + ' * * ' + document.getElementById('zsm-weekday').value;
   } else if (mode === 'monthly') {
     var mo = zsmTimeParts('zsm-monthly-time');
     var day = Math.max(1, Math.min(31, parseInt(document.getElementById('zsm-monthday').value,10) || 1));
@@ -181,8 +124,46 @@ function zsmScheduleModeChanged() {
   document.querySelectorAll('.zsm-mode-fields').forEach(function(el){ el.classList.toggle('active', el.getAttribute('data-mode') === mode); });
   zsmBuildCron();
 }
+function zsmScheduleStatus(text, kind) {
+  var el = document.getElementById('zsm-schedule-status');
+  el.textContent = text;
+  el.className = 'zsm-status ' + kind;
+  el.scrollIntoView({behavior:'smooth', block:'nearest'});
+}
+
 document.addEventListener('DOMContentLoaded', function(){
   document.querySelectorAll('#zsm-policy-form input, #zsm-policy-form select').forEach(function(el){ el.addEventListener('input', zsmBuildCron); el.addEventListener('change', zsmBuildCron); });
+  document.getElementById('zsm-mode').addEventListener('change', zsmScheduleModeChanged);
   zsmScheduleModeChanged();
+
+  document.querySelectorAll('.zsm-schedule-action').forEach(function(form){
+    form.addEventListener('submit', async function(ev){
+      ev.preventDefault();
+      var confirmText = form.getAttribute('data-confirm');
+      if (confirmText && !window.confirm(confirmText)) return;
+      if (form.id === 'zsm-policy-form' && !zsmBuildCron()) {
+        zsmScheduleStatus('Invalid cron expression.', 'err');
+        return;
+      }
+      var button = form.querySelector('button[type=submit]');
+      var oldText = button ? button.textContent : '';
+      if (button) { button.disabled = true; button.textContent = 'Working…'; }
+      zsmScheduleStatus('Applying schedule change…', 'busy');
+      try {
+        var response = await fetch('/plugins/zsnapshot.manager/schedule-action.php', {
+          method:'POST', body:new FormData(form), credentials:'same-origin', cache:'no-store'
+        });
+        var text = await response.text();
+        var data;
+        try { data = JSON.parse(text); } catch(e) { throw new Error(text || ('HTTP ' + response.status)); }
+        if (!response.ok || !data.ok) throw new Error(data.message || 'Schedule operation failed');
+        zsmScheduleStatus(data.message || 'Schedule updated', 'ok');
+        window.setTimeout(function(){ location.reload(); }, 250);
+      } catch(e) {
+        zsmScheduleStatus(e.message || String(e), 'err');
+        if (button) { button.disabled = false; button.textContent = oldText; }
+      }
+    });
+  });
 });
 </script>
