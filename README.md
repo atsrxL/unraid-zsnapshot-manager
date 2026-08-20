@@ -2,7 +2,7 @@
 
 面向 Unraid WebGUI 的原生 ZFS Snapshot 管理插件。
 
-> 当前阶段：`2026.08.20h` 测试版。
+> 当前阶段：`2026.08.20i` 测试版。
 
 ## 已实现
 
@@ -23,7 +23,15 @@
 - Activity log
 - CSRF 校验与参数白名单
 - Settings 页面可选择显示或隐藏 pool 根 dataset
-- Snapshot dataset 筛选、批量展开/折叠与紧凑列表（默认最新 25 条）
+- Snapshot dataset 筛选与紧凑列表（默认最新 25 条）
+
+## 2026.08.20i 重点修复
+
+- 同一 Policy 的 Cron 与手动 **Run now** 使用运行锁，避免并发创建同名 snapshot 或同时执行 retention。
+- 智能保留四项全部设为 `0` 时视为**关闭自动清理**，不会再错误地只留下最新一份。
+- 编辑一个被 Settings 隐藏/排除的 Policy 时保留原 Target，避免 Target 下拉不可见时静默改到其它 dataset。
+- Clone 只输入一个名称时自动放到源 pool 下，pool 根 dataset 的 snapshot 也可以正常 Clone。
+- Release 安装的源码固定到对应版本 tag，避免旧版 PLG 后续从 `main` 混入新版运行文件。
 
 ## 安装
 
@@ -32,8 +40,6 @@ Unraid WebGUI → **Plugins → Install Plugin**：
 ```text
 https://raw.githubusercontent.com/atsrxL/unraid-zsnapshot-manager/main/plugin/zsnapshot.manager.plg
 ```
-
-> 注意：GitHub 仓库必须允许匿名读取 raw 文件。仓库为 Private 时，Unraid Plugin Manager 无法使用上面的裸 URL 下载插件和源码；请在公开仓库后使用该地址，或手动下载 PLG 后进行本地测试。
 
 安装后入口：**Settings → User Utilities → ZFS Snapshot Manager**。
 
@@ -62,6 +68,8 @@ https://raw.githubusercontent.com/atsrxL/unraid-zsnapshot-manager/main/plugin/zs
 - Enable / Disable
 - Run Now
 
+智能保留中某一层设为 `0` 表示关闭该层；四层全部为 `0` 时，不执行自动 pruning。
+
 Policy 持久化在：
 
 ```text
@@ -76,9 +84,11 @@ Cron 由插件生成：
 
 ### Settings
 
-**Show root datasets** 控制 Snapshots 与 Policy target 列表中是否显示 pool 根 dataset。配置持久化在：
+**Show root datasets** 控制 Snapshots 与 Policy target 列表中是否显示 pool 根 dataset。
 
 **Excluded ZFS pools** 可多选隐藏整个 pool。被排除的 pool 不出现在 Status、Snapshots 和新 Policy Target 中；已有 snapshot 与 Policy 不会被删除或自动停用。
+
+配置持久化在：
 
 ```text
 /boot/config/plugins/zsnapshot.manager/settings.cfg
