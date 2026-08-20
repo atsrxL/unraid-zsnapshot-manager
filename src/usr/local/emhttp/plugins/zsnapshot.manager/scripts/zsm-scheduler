@@ -9,7 +9,10 @@ if ($id === '') exit(2);
 
 $policy = null;
 foreach (zsm_load_schedules() as $row) {
-    if (($row['id'] ?? '') === $id) { $policy = $row; break; }
+    if (($row['id'] ?? '') === $id) {
+        $policy = $row;
+        break;
+    }
 }
 if (!$policy || empty($policy['enabled'])) exit(0);
 
@@ -28,20 +31,31 @@ if (!$ok) {
     exit(1);
 }
 
-$keep = max(1, min(10000, (int)($policy['keep'] ?? 24)));
-$out = zsm_exec(['/sbin/zfs','list','-H','-p','-t','snapshot','-o','name','-S','creation','-d','1',$target], $rc);
+$out = zsm_exec(['/sbin/zfs', 'list', '-H', '-p', '-t', 'snapshot', '-o', 'name,creation', '-S', 'creation', '-d', '1', $target], $rc);
 if ($rc === 0 && $out !== '') {
     $managed = [];
-    foreach (explode("\n", trim($out)) as $snap) {
-        if (!zsm_valid_snapshot($snap)) continue;
-        [$ds, $snapName] = explode('@', $snap, 2);
+    foreach (explode("\n", trim($out)) as $line) {
+        $p = explode("\t", $line);
+        if (count($p) < 2 || !zsm_valid_snapshot($p[0])) continue;
+        [$ds, $snapName] = explode('@', $p[0], 2);
         if ($ds !== $target) continue;
-        if (zsm_get_prop($snap, ZSM_MANAGED_PROP) !== '1') continue;
-        if (zsm_get_prop($snap, ZSM_POLICY_PROP) !== $id) continue;
-        $managed[] = ['full'=>$snap, 'name'=>$snapName];
+        if (zsm_get_prop($p[0], ZSM_MANAGED_PROP) !== '1') continue;
+        if (zsm_get_prop($p[0], ZSM_POLICY_PROP) !== $id) continue;
+        $managed[] = ['full' => $p[0], 'name' => $snapName, 'creation' => (int)$p[1]];
     }
 
-    foreach (array_slice($managed, $keep) as $old) {
+    $smart = (($policy['retention_mode'] ?? '') === 'smart') || isset($policy['retention']);
+    $keepSet = [];
+    if ($smart) {
+        $keepSet = zsm_smart_keep_set($managed, (array)($policy['retention'] ?? []));
+    } else {
+        // Backward compatibility for policies created by early test releases.
+        $keep = max(1, min(10000, (int)($policy['keep'] ?? 24)));
+        foreach (array_slice($managed, 0, $keep) as $row) $keepSet[$row['full']] = true;
+    }
+
+    foreach ($managed as $old) {
+        if (isset($keepSet[$old['full']])) continue;
         if ($recursive) {
             [$deleted, $reason] = zsm_delete_managed_generation($target, $old['name'], $id);
         } else {
