@@ -31,16 +31,15 @@ if (!$ok) {
     exit(1);
 }
 
-$out = zsm_exec(['/sbin/zfs', 'list', '-H', '-p', '-t', 'snapshot', '-o', 'name,creation', '-S', 'creation', '-d', '1', $target], $rc);
+$properties = implode(',', ['name', 'creation', ZSM_MANAGED_PROP, ZSM_POLICY_PROP]);
+$out = zsm_exec([zsm_zfs_bin(), 'list', '-H', '-p', '-t', 'snapshot', '-o', $properties, '-S', 'creation', '-d', '1', $target], $rc);
 if ($rc === 0 && $out !== '') {
     $managed = [];
     foreach (explode("\n", trim($out)) as $line) {
         $p = explode("\t", $line);
-        if (count($p) < 2 || !zsm_valid_snapshot($p[0])) continue;
+        if (count($p) < 4 || !zsm_valid_snapshot($p[0])) continue;
         [$ds, $snapName] = explode('@', $p[0], 2);
-        if ($ds !== $target) continue;
-        if (zsm_get_prop($p[0], ZSM_MANAGED_PROP) !== '1') continue;
-        if (zsm_get_prop($p[0], ZSM_POLICY_PROP) !== $id) continue;
+        if ($ds !== $target || $p[2] !== '1' || $p[3] !== $id) continue;
         $managed[] = ['full' => $p[0], 'name' => $snapName, 'creation' => (int)$p[1]];
     }
 
@@ -49,7 +48,6 @@ if ($rc === 0 && $out !== '') {
     if ($smart) {
         $keepSet = zsm_smart_keep_set($managed, (array)($policy['retention'] ?? []));
     } else {
-        // Backward compatibility for policies created by early test releases.
         $keep = max(1, min(10000, (int)($policy['keep'] ?? 24)));
         foreach (array_slice($managed, 0, $keep) as $row) $keepSet[$row['full']] = true;
     }
