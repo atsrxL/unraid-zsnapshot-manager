@@ -18,6 +18,22 @@ foreach (zsm_load_schedules() as $row) {
 if (!$policy) exit(2);
 if (empty($policy['enabled']) && !$force) exit(0);
 
+$lockPath = '/var/run/zsnapshot-manager-' . sha1($id) . '.lock';
+$lock = @fopen($lockPath, 'c');
+if (!$lock || !@flock($lock, LOCK_EX | LOCK_NB)) {
+    $message = 'Policy is already running: ' . $id;
+    zsm_log('SCHEDULE ' . $id . ' skipped: already running');
+    if ($force) {
+        fwrite(STDERR, "ERROR: {$message}\n");
+        exit(1);
+    }
+    exit(0);
+}
+register_shutdown_function(static function () use ($lock): void {
+    @flock($lock, LOCK_UN);
+    @fclose($lock);
+});
+
 $target = (string)($policy['target'] ?? '');
 if (!zsm_valid_dataset($target)) {
     zsm_log("SCHEDULE $id invalid target");
@@ -48,7 +64,13 @@ if ($rc === 0 && $out !== '') {
     $smart = (($policy['retention_mode'] ?? '') === 'smart') || isset($policy['retention']);
     $keepSet = [];
     if ($smart) {
-        $keepSet = zsm_smart_keep_set($managed, (array)($policy['retention'] ?? []));
+        $retention = zsm_retention_counts((array)($policy['retention'] ?? []));
+        if (array_sum($retention) === 0) {
+            // All tiers disabled means retention/pruning is disabled. Keep everything.
+            foreach ($managed as $row) $keepSet[$row['full']] = true;
+        } else {
+            $keepSet = zsm_smart_keep_set($managed, $retention);
+        }
     } else {
         $keep = max(1, min(10000, (int)($policy['keep'] ?? 24)));
         foreach (array_slice($managed, 0, $keep) as $row) $keepSet[$row['full']] = true;
