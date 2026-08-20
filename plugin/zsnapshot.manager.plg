@@ -2,13 +2,22 @@
 <!DOCTYPE PLUGIN [
 <!ENTITY name "zsnapshot.manager">
 <!ENTITY author "atsrxL">
-<!ENTITY version "2026.08.20b">
+<!ENTITY version "2026.08.20c">
 <!ENTITY launch "Settings/ZFS-Snapshot-Manager">
 <!ENTITY pluginURL "https://raw.githubusercontent.com/atsrxL/unraid-zsnapshot-manager/main/plugin/zsnapshot.manager.plg">
 <!ENTITY baseURL "https://raw.githubusercontent.com/atsrxL/unraid-zsnapshot-manager/main/src/usr/local/emhttp/plugins/zsnapshot.manager">
 ]>
 <PLUGIN name="&name;" author="&author;" version="&version;" launch="&launch;" pluginURL="&pluginURL;" icon="camera" min="7.0.0" project="https://github.com/atsrxL/unraid-zsnapshot-manager" readme="https://github.com/atsrxL/unraid-zsnapshot-manager#readme">
 <CHANGES>
+### 2026.08.20c
+- Reworked ZFS mutations to use a dedicated shell backend like unriad-iscsi-manager
+- Snapshot metadata is now written atomically with zfs snapshot -o instead of follow-up zfs set calls
+- Removed the automatic page-level CSRF guard that could turn POST failures into blank pages
+- Snapshot and schedule actions now use JSON endpoints and display errors inline
+- Added hard operation timeouts so a stuck backend cannot hang the WebGUI indefinitely
+- Removed per-snapshot metadata/type/mountpoint N+1 command calls
+- Batched schedule retention metadata reads
+
 ### 2026.08.20b
 - Fixed plugin updater to always replace RAM runtime files while preserving persistent schedules
 
@@ -29,14 +38,8 @@
 
 ### 2026.08.19a
 - Initial test release
-- Snapshot create/delete/hold/release/browse/clone
-- Safety-guarded rollback to newest snapshot only
-- Scheduled snapshots with cron and retention
-- Recursive snapshot metadata and generation-safe retention
-- Unraid notifications and activity log
 </CHANGES>
 
-<!-- Runtime lives in RAM on Unraid. Remove it first so an update can never reuse stale PHP/page files. -->
 <FILE Run="/bin/bash">
 <INLINE><![CDATA[
 rm -rf /usr/local/emhttp/plugins/zsnapshot.manager
@@ -50,23 +53,24 @@ mkdir -p /usr/local/emhttp/plugins/zsnapshot.manager/scripts
 </FILE>
 <FILE Name="/usr/local/emhttp/plugins/&name;/action.php">
 <URL>&baseURL;/action.php</URL>
-<SHA256>cd8e122bb05e690d1ebbcbda4028d56198e9efe11b298b0f4bcd5c8151acffc2</SHA256>
+</FILE>
+<FILE Name="/usr/local/emhttp/plugins/&name;/schedule-action.php">
+<URL>&baseURL;/schedule-action.php</URL>
+</FILE>
+<FILE Name="/usr/local/emhttp/plugins/&name;/scripts/zsm-manager.sh">
+<URL>&baseURL;/scripts/zsm-manager.sh</URL>
 </FILE>
 <FILE Name="/usr/local/emhttp/plugins/&name;/scripts/zsm-scheduler">
 <URL>&baseURL;/scripts/zsm-scheduler</URL>
-<SHA256>8fee7b42298a1d9b5fdbea4ed2836f9853838d529f93ecb5c33429433dab4fc3</SHA256>
 </FILE>
 <FILE Name="/usr/local/emhttp/plugins/&name;/ZFS-Snapshot-Manager.page">
 <URL>&baseURL;/ZFS-Snapshot-Manager.page</URL>
-<SHA256>cd401c2ed2959c771f02c12d969e4aa510a49dfd86114349e6dde0ec6d459274</SHA256>
 </FILE>
 <FILE Name="/usr/local/emhttp/plugins/&name;/ZFS-Snapshots.page">
 <URL>&baseURL;/ZFS-Snapshots.page</URL>
-<SHA256>99b0365ef7e532682af15a62a07b13e550ed9d751ae170f0947c40adc81e6417</SHA256>
 </FILE>
 <FILE Name="/usr/local/emhttp/plugins/&name;/ZFS-Schedules.page">
 <URL>&baseURL;/ZFS-Schedules.page</URL>
-<SHA256>15ceee655bc2416b680512c4bf86e994eb4e0ecd9ffd099c6416c6b8affe41b6</SHA256>
 </FILE>
 
 <FILE Run="/bin/bash">
@@ -74,9 +78,10 @@ mkdir -p /usr/local/emhttp/plugins/zsnapshot.manager/scripts
 set -e
 mkdir -p /boot/config/plugins/zsnapshot.manager
 [ -f /boot/config/plugins/zsnapshot.manager/schedules.json ] || printf '[]\n' > /boot/config/plugins/zsnapshot.manager/schedules.json
+chmod 0755 /usr/local/emhttp/plugins/zsnapshot.manager/scripts/zsm-manager.sh
 chmod 0755 /usr/local/emhttp/plugins/zsnapshot.manager/scripts/zsm-scheduler
 php -r "require '/usr/local/emhttp/plugins/zsnapshot.manager/include/lib.php'; zsm_regenerate_cron();"
-echo "ZFS Snapshot Manager 2026.08.20b installed"
+echo "ZFS Snapshot Manager 2026.08.20c installed"
 ]]></INLINE>
 </FILE>
 
