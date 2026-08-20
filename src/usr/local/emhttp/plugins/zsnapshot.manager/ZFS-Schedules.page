@@ -5,8 +5,7 @@ Tag="clock-o"
 <?php
 require_once '/usr/local/emhttp/plugins/zsnapshot.manager/include/lib.php';
 
-global $var;
-$csrf = (string)($var['csrf_token'] ?? '');
+$csrf = zsm_csrf_token();
 function zsm_h2($v){ return htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8'); }
 function zsm_csrf2($token){ return '<input type="hidden" name="csrf_token" value="'.zsm_h2($token).'">'; }
 
@@ -18,15 +17,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($action==='add') {
         $target=trim((string)($_POST['target'] ?? ''));
         $cron=trim((string)($_POST['cron'] ?? ''));
-        $keep=max(1,min(10000,(int)($_POST['keep'] ?? 24)));
+        $retention=zsm_retention_counts([
+            'hourly'=>(int)($_POST['retention_hourly'] ?? 24),
+            'daily'=>(int)($_POST['retention_daily'] ?? 7),
+            'monthly'=>(int)($_POST['retention_monthly'] ?? 12),
+            'yearly'=>(int)($_POST['retention_yearly'] ?? 3),
+        ]);
+
         if (!zsm_valid_dataset($target)) $error='Invalid target dataset/zvol';
         elseif (!zsm_valid_cron($cron)) $error='Invalid cron expression (5 fields required)';
         else {
             $id=bin2hex(random_bytes(8));
             $schedules[]=[
-                'id'=>$id,'name'=>trim((string)($_POST['name'] ?? 'Policy')) ?: 'Policy',
-                'target'=>$target,'cron'=>$cron,'keep'=>$keep,
-                'recursive'=>!empty($_POST['recursive']),'enabled'=>true,
+                'id'=>$id,
+                'name'=>trim((string)($_POST['name'] ?? 'Policy')) ?: 'Policy',
+                'target'=>$target,
+                'cron'=>$cron,
+                'retention_mode'=>'smart',
+                'retention'=>$retention,
+                'recursive'=>!empty($_POST['recursive']),
+                'enabled'=>true,
                 'notify'=>(($_POST['notify'] ?? 'failure')==='always' ? 'always' : 'failure')
             ];
             if (zsm_save_schedules($schedules)) $message='Schedule created'; else $error='Failed to save schedules';
@@ -56,7 +66,7 @@ $datasets=zsm_datasets();
 <style>
 .zsm-card{border:1px solid #ccc;border-radius:5px;padding:14px;margin:12px 0;background:rgba(127,127,127,.04)}
 .zsm-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}.zsm-table{width:100%;border-collapse:collapse}.zsm-table th,.zsm-table td{padding:8px 6px;border-bottom:1px solid #ddd;text-align:left}.zsm-actions form{display:inline-block;margin-right:4px}.zsm-ok{background:#e8f7e8;padding:8px 10px}.zsm-err{background:#ffe7e7;padding:8px 10px}
-.zsm-wizard{margin-top:12px;padding-top:12px;border-top:1px solid #ccc}.zsm-mode-fields{display:none}.zsm-mode-fields.active{display:block}.zsm-preview{display:inline-block;padding:7px 10px;border-radius:4px;background:rgba(127,127,127,.12);font-size:14px}.zsm-help{opacity:.75}.zsm-full{grid-column:1/-1}
+.zsm-wizard{margin-top:12px;padding-top:12px;border-top:1px solid #ccc}.zsm-mode-fields{display:none}.zsm-mode-fields.active{display:block}.zsm-preview{display:inline-block;padding:7px 10px;border-radius:4px;background:rgba(127,127,127,.12);font-size:14px}.zsm-help{opacity:.75}.zsm-full{grid-column:1/-1}.zsm-retention{display:grid;grid-template-columns:repeat(4,minmax(130px,1fr));gap:10px}.zsm-retention input{width:100px}@media(max-width:800px){.zsm-retention{grid-template-columns:repeat(2,minmax(130px,1fr))}}
 </style>
 <?php if($message): ?><div class="zsm-ok"><?=zsm_h2($message)?></div><?php endif; ?>
 <?php if($error): ?><div class="zsm-err"><?=zsm_h2($error)?></div><?php endif; ?>
@@ -70,7 +80,6 @@ $datasets=zsm_datasets();
 <div class="zsm-grid">
 <label>Name<br><input type="text" name="name" value="Daily" required></label>
 <label>Target<br><select name="target" required><?php foreach($datasets as $d): ?><option value="<?=zsm_h2($d['name'])?>"><?=zsm_h2($d['name'])?> (<?=zsm_h2($d['type'])?>)</option><?php endforeach; ?></select></label>
-<label>Keep latest<br><input type="number" name="keep" value="14" min="1" max="10000" required></label>
 <label>Notification<br><select name="notify"><option value="failure">Failure only</option><option value="always">Success + failure</option></select></label>
 <label><input type="checkbox" name="recursive" value="1"> Recursive snapshot</label>
 </div>
@@ -95,19 +104,35 @@ $datasets=zsm_datasets();
 <div class="zsm-mode-fields" data-mode="monthly"><label>Day of month<br><input id="zsm-monthday" type="number" min="1" max="31" value="1"></label><br><label>Time<br><input id="zsm-monthly-time" type="time" value="03:00"></label></div>
 <div class="zsm-mode-fields" data-mode="custom"><label>Custom cron<br><input id="zsm-custom-cron" type="text" value="0 3 * * *" placeholder="minute hour day month weekday"></label></div>
 
-<div class="zsm-full"><strong>Cron preview:</strong> <code id="zsm-cron-preview" class="zsm-preview">0 3 * * *</code><br><small class="zsm-help">Uses the Unraid server timezone. The saved policy still stores and displays the standard 5-field cron expression.</small></div>
+<div class="zsm-full"><strong>Cron preview:</strong> <code id="zsm-cron-preview" class="zsm-preview">0 3 * * *</code><br><small class="zsm-help">Uses the Unraid server timezone. The saved policy stores and displays the standard 5-field cron expression.</small></div>
 </div>
 </div>
+
+<div class="zsm-wizard">
+<h4>Smart retention</h4>
+<div class="zsm-retention">
+<label>Hourly copies<br><input type="number" name="retention_hourly" value="24" min="0" max="10000"></label>
+<label>Daily copies<br><input type="number" name="retention_daily" value="7" min="0" max="10000"></label>
+<label>Monthly copies<br><input type="number" name="retention_monthly" value="12" min="0" max="10000"></label>
+<label>Yearly copies<br><input type="number" name="retention_yearly" value="3" min="0" max="10000"></label>
+</div>
+<p class="zsm-help">The newest snapshot from each hour/day/month/year bucket is retained. A snapshot selected by more than one tier is stored only once. Set a tier to 0 to disable it. Protected snapshots are never auto-deleted.</p>
+</div>
+
 <p><button type="submit">Create policy</button></p>
 </form>
-<p><small>Retention only removes snapshots created by this exact policy and never removes held snapshots.</small></p>
 </div>
 
 <h3>Policies</h3>
 <table class="zsm-table"><thead><tr><th>Name</th><th>Target</th><th>Cron</th><th>Retention</th><th>Recursive</th><th>Status</th><th>Actions</th></tr></thead><tbody>
 <?php if(!$schedules): ?><tr><td colspan="7"><em>No policies configured</em></td></tr><?php endif; ?>
-<?php foreach($schedules as $r): ?>
-<tr><td><?=zsm_h2($r['name'] ?? '')?></td><td><?=zsm_h2($r['target'] ?? '')?></td><td><code><?=zsm_h2($r['cron'] ?? '')?></code></td><td>Keep <?= (int)($r['keep'] ?? 0) ?></td><td><?=!empty($r['recursive'])?'Yes':'No'?></td><td><?=!empty($r['enabled'])?'Enabled':'Disabled'?></td>
+<?php foreach($schedules as $r):
+    $smart = (($r['retention_mode'] ?? '') === 'smart') || isset($r['retention']);
+    $ret = zsm_retention_counts((array)($r['retention'] ?? []));
+?>
+<tr><td><?=zsm_h2($r['name'] ?? '')?></td><td><?=zsm_h2($r['target'] ?? '')?></td><td><code><?=zsm_h2($r['cron'] ?? '')?></code></td>
+<td><?php if($smart): ?>H <?= $ret['hourly'] ?> · D <?= $ret['daily'] ?> · M <?= $ret['monthly'] ?> · Y <?= $ret['yearly'] ?><?php else: ?>Keep <?= (int)($r['keep'] ?? 24) ?> latest<?php endif; ?></td>
+<td><?=!empty($r['recursive'])?'Yes':'No'?></td><td><?=!empty($r['enabled'])?'Enabled':'Disabled'?></td>
 <td class="zsm-actions">
 <form method="post"><?=zsm_csrf2($csrf)?><input type="hidden" name="action" value="run"><input type="hidden" name="id" value="<?=zsm_h2($r['id'] ?? '')?>"><button type="submit">Run now</button></form>
 <form method="post"><?=zsm_csrf2($csrf)?><input type="hidden" name="action" value="toggle"><input type="hidden" name="id" value="<?=zsm_h2($r['id'] ?? '')?>"><button type="submit"><?=!empty($r['enabled'])?'Disable':'Enable'?></button></form>
