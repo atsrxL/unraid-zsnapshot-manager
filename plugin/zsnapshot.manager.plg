@@ -2,13 +2,21 @@
 <!DOCTYPE PLUGIN [
 <!ENTITY name "zsnapshot.manager">
 <!ENTITY author "atsrxL">
-<!ENTITY version "2026.08.20h">
+<!ENTITY version "2026.08.20i">
 <!ENTITY launch "Settings/ZFS-Snapshot-Manager">
 <!ENTITY pluginURL "https://raw.githubusercontent.com/atsrxL/unraid-zsnapshot-manager/main/plugin/zsnapshot.manager.plg">
-<!ENTITY baseURL "https://raw.githubusercontent.com/atsrxL/unraid-zsnapshot-manager/main/src/usr/local/emhttp/plugins/zsnapshot.manager">
+<!ENTITY baseURL "https://raw.githubusercontent.com/atsrxL/unraid-zsnapshot-manager/2026.08.20i/src/usr/local/emhttp/plugins/zsnapshot.manager">
 ]>
 <PLUGIN name="&name;" author="&author;" version="&version;" launch="&launch;" pluginURL="&pluginURL;" icon="camera" min="7.0.0" project="https://github.com/atsrxL/unraid-zsnapshot-manager" readme="https://github.com/atsrxL/unraid-zsnapshot-manager#readme">
 <CHANGES>
+### 2026.08.20i
+- Added per-policy execution locking to prevent Cron and Run now races
+- Fixed all-zero smart retention so it disables pruning instead of deleting all but the newest snapshot
+- Preserved hidden/excluded policy targets during policy edits
+- Simple clone names are now created inside the source pool, including pool-root snapshots
+- Release source files are pinned to the matching version tag instead of mutable main
+- Added GitHub Actions validation and automatic tagged Release creation
+
 ### 2026.08.20h
 - Added optional multi-pool exclusion in Setting
 - Excluded pools are hidden from Status, Snapshots and new Policy targets
@@ -79,12 +87,6 @@ mkdir -p /usr/local/emhttp/plugins/zsnapshot.manager/scripts
 <FILE Name="/usr/local/emhttp/plugins/&name;/include/lib.php">
 <URL>&baseURL;/include/lib.php</URL>
 </FILE>
-<FILE Name="/usr/local/emhttp/plugins/&name;/action.php">
-<URL>&baseURL;/action.php</URL>
-</FILE>
-<FILE Name="/usr/local/emhttp/plugins/&name;/schedule-action.php">
-<URL>&baseURL;/schedule-action.php</URL>
-</FILE>
 <FILE Name="/usr/local/emhttp/plugins/&name;/scripts/zsm-manager.sh">
 <URL>&baseURL;/scripts/zsm-manager.sh</URL>
 </FILE>
@@ -124,7 +126,7 @@ chmod 0755 /usr/local/emhttp/plugins/zsnapshot.manager/scripts/zsm-scheduler
 chmod 0755 /usr/local/emhttp/plugins/zsnapshot.manager/scripts/zsm-policy-manager
 chmod 0755 /usr/local/emhttp/plugins/zsnapshot.manager/scripts/zsm-settings-manager
 php -r "require '/usr/local/emhttp/plugins/zsnapshot.manager/include/lib.php'; zsm_regenerate_cron();"
-echo "ZFS Snapshot Manager 2026.08.20h installed"
+echo "ZFS Snapshot Manager 2026.08.20i installed"
 ]]></INLINE>
 </FILE>
 
@@ -133,7 +135,7 @@ echo "ZFS Snapshot Manager 2026.08.20h installed"
 rm -rf /usr/local/emhttp/plugins/zsnapshot.manager
 rm -f /boot/config/plugins/zsnapshot.manager/zsnapshot-manager.cron
 /usr/local/sbin/update_cron >/dev/null 2>&1 || true
-# schedules.json is intentionally preserved for reinstall/recovery
+# schedules.json and settings.cfg are intentionally preserved for reinstall/recovery
 ]]></INLINE>
 </FILE>
 </PLUGIN>
