@@ -1,4 +1,4 @@
-Menu="ZFS-Snapshot-Manager"
+Menu="ZFS-Snapshot-Manager:30"
 Title="Schedules"
 Tag="clock-o"
 ---
@@ -15,25 +15,37 @@ $datasets = zsm_datasets();
 <style>
 .zsm-card{border:1px solid #ccc;border-radius:5px;padding:14px;margin:12px 0;background:rgba(127,127,127,.04)}
 .zsm-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}.zsm-table{width:100%;border-collapse:collapse}.zsm-table th,.zsm-table td{padding:8px 6px;border-bottom:1px solid #ddd;text-align:left}.zsm-actions form{display:inline-block;margin-right:4px}
-.zsm-wizard{margin-top:12px;padding-top:12px;border-top:1px solid #ccc}.zsm-mode-fields{display:none}.zsm-mode-fields.active{display:block}.zsm-preview{display:inline-block;padding:7px 10px;border-radius:4px;background:rgba(127,127,127,.12);font-size:14px}.zsm-help{opacity:.75}.zsm-full{grid-column:1/-1}.zsm-retention{display:grid;grid-template-columns:repeat(4,minmax(130px,1fr));gap:10px}.zsm-retention input{width:100px}.zsm-status{display:none;padding:9px 11px;margin:8px 0;border-radius:4px;white-space:pre-wrap}.zsm-status.ok{display:block;background:#e8f7e8}.zsm-status.err{display:block;background:#ffe7e7}.zsm-status.busy{display:block;background:rgba(127,127,127,.12)}
+.zsm-toolbar{display:flex;justify-content:space-between;align-items:center;gap:16px;margin:12px 0}.zsm-toolbar h3,.zsm-wizard-title{margin:0}.zsm-wizard-card[hidden],.zsm-step-pane{display:none}.zsm-step-pane.active{display:block}.zsm-steps{display:flex;gap:8px;margin:14px 0 18px}.zsm-step{flex:1;padding:8px;border-radius:4px;background:rgba(127,127,127,.12);text-align:center}.zsm-step.active{background:#2b6cb0;color:#fff}.zsm-wizard-nav{display:flex;justify-content:space-between;align-items:center;margin-top:16px}.zsm-wizard{margin-top:12px;padding-top:12px;border-top:1px solid #ccc}.zsm-mode-fields{display:none}.zsm-mode-fields.active{display:block}.zsm-preview{display:inline-block;padding:7px 10px;border-radius:4px;background:rgba(127,127,127,.12);font-size:14px}.zsm-help{opacity:.75}.zsm-full{grid-column:1/-1}.zsm-retention{display:grid;grid-template-columns:repeat(4,minmax(130px,1fr));gap:10px}.zsm-retention input{width:100px}.zsm-status{display:none;padding:9px 11px;margin:8px 0;border-radius:4px;white-space:pre-wrap}.zsm-status.ok{display:block;background:#e8f7e8}.zsm-status.err{display:block;background:#ffe7e7}.zsm-status.busy{display:block;background:rgba(127,127,127,.12)}
 @media(max-width:800px){.zsm-retention{grid-template-columns:repeat(2,minmax(130px,1fr))}}
 </style>
-<div id="zsm-schedule-status" class="zsm-status"></div>
+<div class="zsm-toolbar">
+  <div><h3>Snapshot policies</h3><span class="zsm-help">Each policy has independent scheduling and retention settings.</span></div>
+  <button type="button" id="zsm-create-policy">Create snapshot policy</button>
+</div>
 
-<div class="zsm-card">
-<h3>Create snapshot policy</h3>
-<form method="post" id="zsm-policy-form" class="zsm-schedule-action">
+<div class="zsm-card zsm-wizard-card" id="zsm-policy-wizard" hidden>
+<h3 class="zsm-wizard-title" id="zsm-wizard-title">Create snapshot policy</h3>
+<div class="zsm-steps"><div class="zsm-step active" data-step="1">1. Basics</div><div class="zsm-step" data-step="2">2. Frequency</div><div class="zsm-step" data-step="3">3. Retention</div></div>
+<form method="post" action="/update.php" target="progressFrame" id="zsm-policy-form" onsubmit="return zsmPreparePolicyForm(this);">
 <?=zsm_csrf2($csrf)?>
-<input type="hidden" name="action" value="add">
+<input type="hidden" name="#command" value="<?=ZSM_POLICY_SCRIPT?>">
+<input type="hidden" name="#arg[1]" value="add"><input type="hidden" name="#arg[2]" value="">
+<input type="hidden" name="#arg[3]" value=""><input type="hidden" name="#arg[4]" value=""><input type="hidden" name="#arg[5]" value="">
+<input type="hidden" name="#arg[6]" value="24"><input type="hidden" name="#arg[7]" value="7"><input type="hidden" name="#arg[8]" value="12"><input type="hidden" name="#arg[9]" value="3">
+<input type="hidden" name="#arg[10]" value="0"><input type="hidden" name="#arg[11]" value="failure">
+<input type="hidden" name="zsm_action" value="add">
+<input type="hidden" name="id" value="">
 <input type="hidden" name="cron" id="zsm-cron-value" value="0 3 * * *">
+<section class="zsm-step-pane active" data-step="1">
 <div class="zsm-grid">
 <label>Name<br><input type="text" name="name" value="Daily" required></label>
 <label>Target<br><select name="target" required><?php foreach($datasets as $d): ?><option value="<?=zsm_h2($d['name'])?>"><?=zsm_h2($d['name'])?> (<?=zsm_h2($d['type'])?>)</option><?php endforeach; ?></select></label>
 <label>Notification<br><select name="notify"><option value="failure">Failure only</option><option value="always">Success + failure</option></select></label>
 <label><input type="checkbox" name="recursive" value="1"> Recursive snapshot</label>
 </div>
+</section>
 
-<div class="zsm-wizard">
+<section class="zsm-step-pane" data-step="2">
 <h4>Schedule</h4>
 <div class="zsm-grid">
 <label>Frequency<br>
@@ -53,9 +65,9 @@ $datasets = zsm_datasets();
 <div class="zsm-mode-fields" data-mode="custom"><label>Custom cron<br><input id="zsm-custom-cron" type="text" value="0 3 * * *" placeholder="minute hour day month weekday"></label></div>
 <div class="zsm-full"><strong>Cron preview:</strong> <code id="zsm-cron-preview" class="zsm-preview">0 3 * * *</code><br><small class="zsm-help">Uses the Unraid server timezone. The saved policy stores and displays the standard 5-field cron expression.</small></div>
 </div>
-</div>
+</section>
 
-<div class="zsm-wizard">
+<section class="zsm-step-pane" data-step="3">
 <h4>Smart retention</h4>
 <div class="zsm-retention">
 <label>Hourly copies<br><input type="number" name="retention_hourly" value="24" min="0" max="10000"></label>
@@ -64,12 +76,15 @@ $datasets = zsm_datasets();
 <label>Yearly copies<br><input type="number" name="retention_yearly" value="3" min="0" max="10000"></label>
 </div>
 <p class="zsm-help">The newest snapshot from each hour/day/month/year bucket is retained. A snapshot selected by more than one tier is stored only once. Set a tier to 0 to disable it. Protected snapshots are never auto-deleted.</p>
+<p><strong>Review:</strong> <span id="zsm-policy-review"></span></p>
+</section>
+<div class="zsm-wizard-nav">
+  <span><button type="button" id="zsm-wizard-cancel">Cancel</button></span>
+  <span><button type="button" id="zsm-wizard-back" hidden>Back</button> <button type="button" id="zsm-wizard-next">Next</button> <button type="submit" id="zsm-wizard-save" hidden>Create policy</button></span>
 </div>
-<p><button type="submit">Create policy</button></p>
 </form>
 </div>
 
-<h3>Policies</h3>
 <table class="zsm-table"><thead><tr><th>Name</th><th>Target</th><th>Cron</th><th>Retention</th><th>Recursive</th><th>Status</th><th>Actions</th></tr></thead><tbody>
 <?php if(!$schedules): ?><tr><td colspan="7"><em>No policies configured</em></td></tr><?php endif; ?>
 <?php foreach($schedules as $r):
@@ -80,9 +95,10 @@ $datasets = zsm_datasets();
 <td><?php if($smart): ?>H <?= $ret['hourly'] ?> · D <?= $ret['daily'] ?> · M <?= $ret['monthly'] ?> · Y <?= $ret['yearly'] ?><?php else: ?>Keep <?= (int)($r['keep'] ?? 24) ?> latest<?php endif; ?></td>
 <td><?=!empty($r['recursive'])?'Yes':'No'?></td><td><?=!empty($r['enabled'])?'Enabled':'Disabled'?></td>
 <td class="zsm-actions">
-<form method="post" class="zsm-schedule-action"><?=zsm_csrf2($csrf)?><input type="hidden" name="action" value="run"><input type="hidden" name="id" value="<?=zsm_h2($r['id'] ?? '')?>"><button type="submit">Run now</button></form>
-<form method="post" class="zsm-schedule-action"><?=zsm_csrf2($csrf)?><input type="hidden" name="action" value="toggle"><input type="hidden" name="id" value="<?=zsm_h2($r['id'] ?? '')?>"><button type="submit"><?=!empty($r['enabled'])?'Disable':'Enable'?></button></form>
-<form method="post" class="zsm-schedule-action" data-confirm="Delete this schedule? Existing snapshots are not deleted."><?=zsm_csrf2($csrf)?><input type="hidden" name="action" value="delete"><input type="hidden" name="id" value="<?=zsm_h2($r['id'] ?? '')?>"><button type="submit">Delete</button></form>
+<button type="button" class="zsm-edit-policy" data-policy-id="<?=zsm_h2($r['id'] ?? '')?>">Edit</button>
+<form method="post" action="/update.php" target="progressFrame" onsubmit="setTimeout(function(){location.reload();},1500);"><?=zsm_csrf2($csrf)?><input type="hidden" name="#command" value="<?=ZSM_POLICY_SCRIPT?>"><input type="hidden" name="#arg[1]" value="run"><input type="hidden" name="#arg[2]" value="<?=zsm_h2($r['id'] ?? '')?>"><button type="submit">Run now</button></form>
+<form method="post" action="/update.php" target="progressFrame" onsubmit="setTimeout(function(){location.reload();},900);"><?=zsm_csrf2($csrf)?><input type="hidden" name="#command" value="<?=ZSM_POLICY_SCRIPT?>"><input type="hidden" name="#arg[1]" value="toggle"><input type="hidden" name="#arg[2]" value="<?=zsm_h2($r['id'] ?? '')?>"><button type="submit"><?=!empty($r['enabled'])?'Disable':'Enable'?></button></form>
+<form method="post" action="/update.php" target="progressFrame" onsubmit="if(!window.confirm('Delete this policy? Existing snapshots are not deleted.'))return false;setTimeout(function(){location.reload();},900);"><?=zsm_csrf2($csrf)?><input type="hidden" name="#command" value="<?=ZSM_POLICY_SCRIPT?>"><input type="hidden" name="#arg[1]" value="delete"><input type="hidden" name="#arg[2]" value="<?=zsm_h2($r['id'] ?? '')?>"><button type="submit">Delete</button></form>
 </td></tr>
 <?php endforeach; ?></tbody></table>
 
@@ -90,6 +106,9 @@ $datasets = zsm_datasets();
 <pre><?php $f=ZSM_CONFIG_DIR.'/zsnapshot-manager.cron'; echo zsm_h2(is_file($f)?file_get_contents($f):'# no cron generated'); ?></pre>
 
 <script>
+var zsmPolicies = <?=json_encode(array_values($schedules), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT)?>;
+var zsmWizardStep = 1;
+
 function zsmTimeParts(id) {
   var value = document.getElementById(id).value || '00:00';
   var parts = value.split(':');
@@ -124,46 +143,112 @@ function zsmScheduleModeChanged() {
   document.querySelectorAll('.zsm-mode-fields').forEach(function(el){ el.classList.toggle('active', el.getAttribute('data-mode') === mode); });
   zsmBuildCron();
 }
-function zsmScheduleStatus(text, kind) {
-  var el = document.getElementById('zsm-schedule-status');
-  el.textContent = text;
-  el.className = 'zsm-status ' + kind;
-  el.scrollIntoView({behavior:'smooth', block:'nearest'});
+function zsmSetField(name, value) {
+  var field = document.querySelector('#zsm-policy-form [name="' + name + '"]');
+  if (!field) return;
+  if (field.type === 'checkbox') field.checked = !!value;
+  else field.value = value == null ? '' : value;
+}
+function zsmLoadCron(cron) {
+  cron = String(cron || '0 3 * * *').trim();
+  var parts = cron.split(/\s+/), mode = 'custom', match;
+  if ((match = parts[0] && parts[0].match(/^\*\/(5|10|15|20|30)$/)) && parts.slice(1).join(' ') === '* * * *') {
+    mode = 'minutes'; document.getElementById('zsm-minutes').value = match[1];
+  } else if (/^\d+$/.test(parts[0] || '') && parts.slice(1).join(' ') === '* * * *') {
+    mode = 'hourly'; document.getElementById('zsm-hourly-minute').value = parts[0];
+  } else if (/^\d+$/.test(parts[0] || '') && /^\d+$/.test(parts[1] || '') && parts.slice(2).join(' ') === '* * *') {
+    mode = 'daily'; document.getElementById('zsm-daily-time').value = String(parts[1]).padStart(2,'0') + ':' + String(parts[0]).padStart(2,'0');
+  } else if (/^\d+$/.test(parts[0] || '') && /^\d+$/.test(parts[1] || '') && parts[2] === '*' && parts[3] === '*' && /^[0-6]$/.test(parts[4] || '')) {
+    mode = 'weekly'; document.getElementById('zsm-weekday').value = parts[4]; document.getElementById('zsm-weekly-time').value = String(parts[1]).padStart(2,'0') + ':' + String(parts[0]).padStart(2,'0');
+  } else if (/^\d+$/.test(parts[0] || '') && /^\d+$/.test(parts[1] || '') && /^\d+$/.test(parts[2] || '') && parts[3] === '*' && parts[4] === '*') {
+    mode = 'monthly'; document.getElementById('zsm-monthday').value = parts[2]; document.getElementById('zsm-monthly-time').value = String(parts[1]).padStart(2,'0') + ':' + String(parts[0]).padStart(2,'0');
+  } else {
+    document.getElementById('zsm-custom-cron').value = cron;
+  }
+  document.getElementById('zsm-mode').value = mode;
+  zsmScheduleModeChanged();
+}
+function zsmReviewPolicy() {
+  zsmBuildCron();
+  var form = document.getElementById('zsm-policy-form');
+  var target = form.querySelector('[name=target]').value;
+  var recursive = form.querySelector('[name=recursive]').checked ? ', recursive' : '';
+  var r = ['hourly','daily','monthly','yearly'].map(function(tier){
+    return tier.charAt(0).toUpperCase() + '=' + form.querySelector('[name=retention_' + tier + ']').value;
+  }).join(', ');
+  document.getElementById('zsm-policy-review').textContent = target + recursive + ' · ' + document.getElementById('zsm-cron-value').value + ' · ' + r;
+}
+function zsmShowWizardStep(step) {
+  zsmWizardStep = Math.max(1, Math.min(3, step));
+  document.querySelectorAll('.zsm-step,.zsm-step-pane').forEach(function(el){
+    el.classList.toggle('active', parseInt(el.getAttribute('data-step'),10) === zsmWizardStep);
+  });
+  document.getElementById('zsm-wizard-back').hidden = zsmWizardStep === 1;
+  document.getElementById('zsm-wizard-next').hidden = zsmWizardStep === 3;
+  document.getElementById('zsm-wizard-save').hidden = zsmWizardStep !== 3;
+  if (zsmWizardStep === 3) zsmReviewPolicy();
+}
+function zsmOpenWizard(policy) {
+  var form = document.getElementById('zsm-policy-form');
+  form.reset();
+  zsmSetField('zsm_action', policy ? 'update' : 'add');
+  zsmSetField('id', policy ? policy.id : '');
+  zsmSetField('name', policy ? policy.name : 'Daily');
+  if (policy) zsmSetField('target', policy.target);
+  zsmSetField('notify', policy ? policy.notify : 'failure');
+  zsmSetField('recursive', policy ? policy.recursive : false);
+  var retention = policy && policy.retention ? policy.retention : {hourly:24,daily:7,monthly:12,yearly:3};
+  ['hourly','daily','monthly','yearly'].forEach(function(tier){ zsmSetField('retention_' + tier, retention[tier] == null ? 0 : retention[tier]); });
+  zsmLoadCron(policy ? policy.cron : '0 3 * * *');
+  document.getElementById('zsm-wizard-title').textContent = policy ? 'Edit snapshot policy' : 'Create snapshot policy';
+  document.getElementById('zsm-wizard-save').textContent = policy ? 'Save changes' : 'Create policy';
+  document.getElementById('zsm-policy-wizard').hidden = false;
+  zsmShowWizardStep(1);
+  document.getElementById('zsm-policy-wizard').scrollIntoView({behavior:'smooth', block:'start'});
+}
+function zsmCloseWizard() {
+  document.getElementById('zsm-policy-wizard').hidden = true;
+}
+function zsmPreparePolicyForm(form) {
+  if (!form.reportValidity() || !zsmBuildCron()) return false;
+  var arg = function(n, value){ form.elements.namedItem('#arg[' + n + ']').value = String(value == null ? '' : value); };
+  arg(1, form.elements.zsm_action.value);
+  arg(2, form.elements.id.value);
+  arg(3, form.elements.name.value);
+  arg(4, form.elements.target.value);
+  arg(5, form.elements.cron.value);
+  arg(6, form.elements.retention_hourly.value);
+  arg(7, form.elements.retention_daily.value);
+  arg(8, form.elements.retention_monthly.value);
+  arg(9, form.elements.retention_yearly.value);
+  arg(10, form.elements.recursive.checked ? '1' : '0');
+  arg(11, form.elements.notify.value);
+  var save = document.getElementById('zsm-wizard-save');
+  save.disabled = true;
+  save.textContent = 'Applying…';
+  window.setTimeout(function(){ location.reload(); }, 1000);
+  return true;
 }
 
 document.addEventListener('DOMContentLoaded', function(){
   document.querySelectorAll('#zsm-policy-form input, #zsm-policy-form select').forEach(function(el){ el.addEventListener('input', zsmBuildCron); el.addEventListener('change', zsmBuildCron); });
   document.getElementById('zsm-mode').addEventListener('change', zsmScheduleModeChanged);
   zsmScheduleModeChanged();
-
-  document.querySelectorAll('.zsm-schedule-action').forEach(function(form){
-    form.addEventListener('submit', async function(ev){
-      ev.preventDefault();
-      var confirmText = form.getAttribute('data-confirm');
-      if (confirmText && !window.confirm(confirmText)) return;
-      if (form.id === 'zsm-policy-form' && !zsmBuildCron()) {
-        zsmScheduleStatus('Invalid cron expression.', 'err');
-        return;
-      }
-      var button = form.querySelector('button[type=submit]');
-      var oldText = button ? button.textContent : '';
-      if (button) { button.disabled = true; button.textContent = 'Working…'; }
-      zsmScheduleStatus('Applying schedule change…', 'busy');
-      try {
-        var response = await fetch('/plugins/zsnapshot.manager/schedule-action.php', {
-          method:'POST', body:new FormData(form), credentials:'same-origin', cache:'no-store'
-        });
-        var text = await response.text();
-        var data;
-        try { data = JSON.parse(text); } catch(e) { throw new Error(text || ('HTTP ' + response.status)); }
-        if (!response.ok || !data.ok) throw new Error(data.message || 'Schedule operation failed');
-        zsmScheduleStatus(data.message || 'Schedule updated', 'ok');
-        window.setTimeout(function(){ location.reload(); }, 250);
-      } catch(e) {
-        zsmScheduleStatus(e.message || String(e), 'err');
-        if (button) { button.disabled = false; button.textContent = oldText; }
-      }
+  document.getElementById('zsm-create-policy').addEventListener('click', function(){ zsmOpenWizard(null); });
+  document.getElementById('zsm-wizard-cancel').addEventListener('click', zsmCloseWizard);
+  document.getElementById('zsm-wizard-back').addEventListener('click', function(){ zsmShowWizardStep(zsmWizardStep - 1); });
+  document.getElementById('zsm-wizard-next').addEventListener('click', function(){
+    if (zsmWizardStep === 1 && !document.getElementById('zsm-policy-form').reportValidity()) return;
+    zsmShowWizardStep(zsmWizardStep + 1);
+  });
+  document.querySelectorAll('.zsm-edit-policy').forEach(function(button){
+    button.addEventListener('click', function(){
+      var id = button.getAttribute('data-policy-id');
+      var policy = zsmPolicies.find(function(row){ return row.id === id; });
+      if (policy) zsmOpenWizard(policy);
     });
   });
+  if (new URLSearchParams(window.location.search).get('create') === '1') zsmOpenWizard(null);
+
 });
 </script>

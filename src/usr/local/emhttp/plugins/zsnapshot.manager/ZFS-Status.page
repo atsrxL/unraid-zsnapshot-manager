@@ -1,0 +1,53 @@
+Menu="ZFS-Snapshot-Manager:10"
+Title="Status"
+Tag="dashboard"
+---
+<?php
+require_once '/usr/local/emhttp/plugins/zsnapshot.manager/include/lib.php';
+
+function zsm_status_h($v){return htmlspecialchars((string)$v,ENT_QUOTES|ENT_SUBSTITUTE,'UTF-8');}
+function zsm_status_bytes($n){
+    $units=['B','KiB','MiB','GiB','TiB','PiB'];$i=0;$n=(float)$n;
+    while($n>=1024&&$i<count($units)-1){$n/=1024;$i++;}
+    return ($i===0?(string)(int)$n:number_format($n,2)).' '.$units[$i];
+}
+function zsm_status_anchor($dataset){return 'zsm-dataset-'.substr(hash('sha256',(string)$dataset),0,12);}
+
+$allDatasets=zsm_datasets(true);
+$visibleDatasets=zsm_datasets();
+$snapshots=zsm_snapshots();
+$schedules=zsm_load_schedules();
+$snapshotCounts=[];foreach($snapshots as $row)$snapshotCounts[$row['dataset']]=($snapshotCounts[$row['dataset']]??0)+1;
+$pools=[];
+foreach($allDatasets as $row){
+    $pool=strtok($row['name'],'/');
+    if(!isset($pools[$pool]))$pools[$pool]=['name'=>$pool,'used'=>0,'available'=>0,'datasets'=>0,'snapshots'=>0,'protected'=>0,'latest'=>0,'visible'=>[],'policies'=>0];
+    $pools[$pool]['datasets']++;
+    if($row['name']===$pool){$pools[$pool]['used']=$row['used'];$pools[$pool]['available']=$row['available'];}
+}
+foreach($visibleDatasets as $row){$pool=strtok($row['name'],'/');if(isset($pools[$pool]))$pools[$pool]['visible'][]=$row;}
+foreach($snapshots as $row){$pool=strtok($row['dataset'],'/');if(!isset($pools[$pool]))continue;$pools[$pool]['snapshots']++;$pools[$pool]['protected']+=!empty($row['any_held'])?1:0;$pools[$pool]['latest']=max($pools[$pool]['latest'],(int)$row['creation']);}
+foreach($schedules as $row){$pool=strtok((string)($row['target']??''),'/');if(isset($pools[$pool]))$pools[$pool]['policies']++;}
+?>
+<style>
+.zsm-status-title{display:flex;justify-content:space-between;align-items:end;gap:18px;margin:12px 0 16px}.zsm-status-title h2{margin:0}.zsm-muted{opacity:.72}.zsm-pool{border:1px solid #ccc;border-radius:6px;margin:12px 0;background:rgba(127,127,127,.035);overflow:hidden}.zsm-pool-head{display:flex;justify-content:space-between;gap:16px;align-items:center;padding:14px 16px;border-bottom:1px solid #ddd}.zsm-pool-name{font-size:20px;font-weight:600}.zsm-pool-body{padding:16px}.zsm-space-row{display:flex;justify-content:space-between;gap:12px;margin-bottom:7px}.zsm-space-bar{height:10px;border-radius:6px;background:#c8c8c8;overflow:hidden}.zsm-space-used{height:100%;background:#67c23a}.zsm-metrics{display:grid;grid-template-columns:repeat(4,minmax(120px,1fr));gap:10px;margin:14px 0}.zsm-metric{padding:10px 12px;border:1px solid #ddd;border-radius:5px}.zsm-metric strong{display:block;font-size:18px}.zsm-datasets{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}.zsm-dataset{display:inline-flex;align-items:center;gap:7px;padding:8px 10px;border:1px solid #ccc;border-radius:5px;text-decoration:none}.zsm-dataset:hover{border-color:#2b6cb0}.zsm-dataset i{font-size:17px}.zsm-badge{font-size:11px;padding:2px 6px;border-radius:9px;background:#ddd}@media(max-width:760px){.zsm-metrics{grid-template-columns:repeat(2,minmax(120px,1fr))}.zsm-pool-head{align-items:flex-start;flex-direction:column}}
+</style>
+<div class="zsm-status-title"><div><h2>Storage status</h2><div class="zsm-muted">Pool capacity, snapshot coverage and policy overview.</div></div><a class="button" href="/Settings/ZFS-Snapshot-Manager/ZFS-Snapshots" onclick="var tab=document.getElementById('tab2');if(tab){tab.click();return false;}">Open snapshot manager</a></div>
+<?php if(!$pools): ?><p>No imported ZFS pools were found.</p><?php endif; ?>
+<?php foreach($pools as $pool):$total=$pool['used']+$pool['available'];$usedPct=$total>0?round($pool['used']*100/$total,1):0; ?>
+<section class="zsm-pool">
+  <header class="zsm-pool-head"><div><span class="zsm-pool-name"><i class="fa fa-database"></i> <?=zsm_status_h($pool['name'])?></span><div class="zsm-muted"><?=$pool['datasets']?> datasets</div></div><div><strong><?=$pool['latest']?date('Y-m-d H:i',$pool['latest']):'No snapshots'?></strong><div class="zsm-muted">Latest snapshot</div></div></header>
+  <div class="zsm-pool-body">
+    <div class="zsm-space-row"><strong>Space allocation</strong><span><?=zsm_status_bytes($pool['used'])?> used · <?=zsm_status_bytes($pool['available'])?> free</span></div>
+    <div class="zsm-space-bar"><div class="zsm-space-used" style="width:<?=min(100,$usedPct)?>%"></div></div>
+    <div class="zsm-metrics">
+      <div class="zsm-metric"><strong><?=$usedPct?>%</strong><span class="zsm-muted">Used</span></div>
+      <div class="zsm-metric"><strong><?=$pool['snapshots']?></strong><span class="zsm-muted">Snapshots</span></div>
+      <div class="zsm-metric"><strong><?=$pool['protected']?></strong><span class="zsm-muted">Protected</span></div>
+      <div class="zsm-metric"><strong><?=$pool['policies']?></strong><span class="zsm-muted">Policies</span></div>
+    </div>
+    <strong>Datasets</strong>
+    <div class="zsm-datasets"><?php foreach($pool['visible'] as $dataset):$count=$snapshotCounts[$dataset['name']]??0;$anchor=zsm_status_anchor($dataset['name']); ?><a class="zsm-dataset" href="/Settings/ZFS-Snapshot-Manager/ZFS-Snapshots#<?=$anchor?>" onclick="var tab=document.getElementById('tab2');if(tab){location.hash='<?=$anchor?>';tab.click();return false;}"><i class="fa <?=$dataset['type']==='volume'?'fa-hdd-o':'fa-folder-o'?>"></i><span><?=zsm_status_h($dataset['name'])?></span><span class="zsm-badge"><?=$count?></span></a><?php endforeach; ?></div>
+  </div>
+</section>
+<?php endforeach; ?>

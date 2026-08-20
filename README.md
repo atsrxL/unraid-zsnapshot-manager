@@ -2,7 +2,7 @@
 
 面向 Unraid WebGUI 的原生 ZFS Snapshot 管理插件。
 
-> 当前阶段：`2026.08.19a` 测试版。
+> 当前阶段：`2026.08.20h` 测试版。
 
 ## 已实现
 
@@ -14,12 +14,16 @@
 - Clone snapshot
 - 安全 Rollback：测试版仅允许回滚到当前 dataset 最新 snapshot
 - Snapshot Policy / Cron 定时任务
+- 首页引导式 **Create snapshot policy** 按钮
+- 每个 Policy 可独立编辑 target、快照频率、智能保留、recursive 与通知策略
 - Run Now
 - Retention 自动清理
 - Recursive snapshot generation-safe retention
 - Unraid 通知
 - Activity log
 - CSRF 校验与参数白名单
+- Settings 页面可选择显示或隐藏 pool 根 dataset
+- Snapshot dataset 筛选、批量展开/折叠与紧凑列表（默认最新 25 条）
 
 ## 安装
 
@@ -31,16 +35,19 @@ https://raw.githubusercontent.com/atsrxL/unraid-zsnapshot-manager/main/plugin/zs
 
 > 注意：GitHub 仓库必须允许匿名读取 raw 文件。仓库为 Private 时，Unraid Plugin Manager 无法使用上面的裸 URL 下载插件和源码；请在公开仓库后使用该地址，或手动下载 PLG 后进行本地测试。
 
-安装后入口：
-
-- **Tools → ZFS Snapshot Manager**
-- **Tools → ZFS Snapshot Schedules**
+安装后入口：**Settings → User Utilities → ZFS Snapshot Manager**。
 
 ## 页面
 
+页签固定顺序：**Status → Snapshots → Schedules → Setting**。
+
+### Status
+
+按 ZFS pool 汇总容量、dataset 数、snapshot 数、受保护 snapshot、Policy 数与最近 snapshot 时间。
+
 ### Snapshots
 
-按 dataset / zvol 展示 snapshot，支持：Create、Delete、Lock/Unlock、Browse、Clone、Rollback。
+左侧选择 dataset / zvol，右侧集中展示 snapshot 和操作，支持：Create、Delete、Lock/Unlock、Browse、Clone、Rollback。
 
 ### Schedules
 
@@ -49,8 +56,9 @@ https://raw.githubusercontent.com/atsrxL/unraid-zsnapshot-manager/main/plugin/zs
 - Target dataset / zvol
 - Cron（5-field）
 - Recursive
-- Keep latest N
+- Smart retention（Hourly / Daily / Monthly / Yearly）
 - Failure only / Success + failure notification
+- Edit
 - Enable / Disable
 - Run Now
 
@@ -65,6 +73,18 @@ Cron 由插件生成：
 ```text
 /boot/config/plugins/zsnapshot.manager/zsnapshot-manager.cron
 ```
+
+### Settings
+
+**Show root datasets** 控制 Snapshots 与 Policy target 列表中是否显示 pool 根 dataset。配置持久化在：
+
+**Excluded ZFS pools** 可多选隐藏整个 pool。被排除的 pool 不出现在 Status、Snapshots 和新 Policy Target 中；已有 snapshot 与 Policy 不会被删除或自动停用。
+
+```text
+/boot/config/plugins/zsnapshot.manager/settings.cfg
+```
+
+运行日志也在 Setting 页面下方显示。
 
 ## Snapshot metadata
 

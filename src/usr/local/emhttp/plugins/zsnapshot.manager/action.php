@@ -14,7 +14,7 @@ function zsm_json(bool $ok, string $message, int $status = 200): never
 if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') zsm_json(false, 'POST required', 405);
 if (!zsm_csrf_valid()) zsm_json(false, 'Security token validation failed. Refresh the page and try again.', 403);
 
-$action = (string)($_POST['action'] ?? '');
+$action = (string)($_POST['zsm_action'] ?? $_POST['action'] ?? '');
 
 try {
     if ($action === 'create') {

@@ -1,122 +1,87 @@
-Menu="ZFS-Snapshot-Manager"
+Menu="ZFS-Snapshot-Manager:20"
 Title="Snapshots"
 Tag="camera"
 ---
 <?php
 require_once '/usr/local/emhttp/plugins/zsnapshot.manager/include/lib.php';
 
-$csrf = zsm_csrf_token();
-function zsm_h($v){ return htmlspecialchars((string)$v, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); }
-function zsm_bytes($n){
-    $u=['B','KiB','MiB','GiB','TiB','PiB']; $i=0; $n=(float)$n;
-    while($n>=1024 && $i<count($u)-1){$n/=1024;$i++;}
-    return ($i===0 ? (string)(int)$n : number_format($n,2)) . ' ' . $u[$i];
-}
-function zsm_csrf_input($token){ return '<input type="hidden" name="csrf_token" value="'.zsm_h($token).'">'; }
+$csrf=zsm_csrf_token();
+function zsm_h($v){return htmlspecialchars((string)$v,ENT_QUOTES|ENT_SUBSTITUTE,'UTF-8');}
+function zsm_bytes($n){$u=['B','KiB','MiB','GiB','TiB','PiB'];$i=0;$n=(float)$n;while($n>=1024&&$i<count($u)-1){$n/=1024;$i++;}return ($i===0?(string)(int)$n:number_format($n,2)).' '.$u[$i];}
+function zsm_csrf_input($token){return '<input type="hidden" name="csrf_token" value="'.zsm_h($token).'">';}
+function zsm_dataset_anchor($dataset){return 'zsm-dataset-'.substr(hash('sha256',(string)$dataset),0,12);}
 
-$datasets = zsm_datasets();
-$datasetMap = [];
-foreach ($datasets as $datasetRow) $datasetMap[$datasetRow['name']] = $datasetRow;
-$snapshots = zsm_snapshots();
-$byDataset=[];
-foreach($snapshots as $s) $byDataset[$s['dataset']][]=$s;
+$datasets=zsm_datasets();
+$datasetMap=[];foreach($datasets as $row)$datasetMap[$row['name']]=$row;
+$snapshots=zsm_snapshots();
+$byDataset=[];foreach($snapshots as $row)$byDataset[$row['dataset']][]=$row;
+$visibleSnapshotCount=0;foreach($datasets as $row)$visibleSnapshotCount+=count($byDataset[$row['name']]??[]);
+$selectedName=$datasets[0]['name']??'';
+foreach($datasets as $row){if(!empty($byDataset[$row['name']])){$selectedName=$row['name'];break;}}
+$showAll=(string)($_GET['all']??'')==='1';
+$rowLimit=25;
 ?>
 <style>
-.zsm-card{border:1px solid #ccc;border-radius:5px;margin:12px 0;background:rgba(127,127,127,.04)}
-.zsm-head{display:flex;justify-content:space-between;align-items:center;padding:12px 14px;cursor:pointer}.zsm-title{font-size:17px;font-weight:600}.zsm-meta{opacity:.75;font-size:12px}
-.zsm-body{padding:0 14px 14px}.zsm-table{width:100%;border-collapse:collapse}.zsm-table th,.zsm-table td{padding:7px 6px;border-bottom:1px solid #ddd;text-align:left}.zsm-actions{white-space:nowrap}.zsm-actions form{display:inline-block;margin:0 3px 3px 0}
-.zsm-badge{display:inline-block;padding:2px 6px;border-radius:9px;background:#ddd;font-size:11px}.zsm-lock{font-weight:bold}
-.zsm-create{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:8px 0 14px}.zsm-create input[type=text]{min-width:230px}.zsm-status{display:none;padding:9px 11px;margin:8px 0;border-radius:4px;white-space:pre-wrap}.zsm-status.ok{display:block;background:#e8f7e8}.zsm-status.err{display:block;background:#ffe7e7}.zsm-status.busy{display:block;background:rgba(127,127,127,.12)}
+.zsm-appbar{display:flex;justify-content:space-between;align-items:center;gap:18px;margin:12px 0 14px}.zsm-appbar h2{margin:0}.zsm-muted{opacity:.72}.zsm-app-actions{display:flex;gap:7px;flex-wrap:wrap}.zsm-snapshot-layout{display:grid;grid-template-columns:minmax(240px,300px) minmax(0,1fr);min-height:540px;border:1px solid #ccc;border-radius:6px;overflow:hidden;background:rgba(127,127,127,.025)}.zsm-dataset-nav{border-right:1px solid #ccc;background:rgba(127,127,127,.055)}.zsm-filter{padding:12px;border-bottom:1px solid #ddd}.zsm-filter input{width:100%;box-sizing:border-box}.zsm-dataset-list{max-height:650px;overflow:auto}.zsm-dataset-item{display:flex;align-items:center;gap:9px;padding:10px 12px;border-bottom:1px solid rgba(127,127,127,.17);cursor:pointer;color:inherit;text-decoration:none}.zsm-dataset-item:hover,.zsm-dataset-item.active{background:rgba(43,108,176,.13);color:inherit}.zsm-dataset-item.active{box-shadow:inset 3px 0 #2b6cb0}.zsm-dataset-item i{width:18px;text-align:center}.zsm-dataset-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}.zsm-count{min-width:22px;padding:2px 6px;border-radius:10px;background:#ddd;text-align:center;font-size:11px}.zsm-panel{padding:16px;min-width:0}.zsm-panel[hidden]{display:none}.zsm-panel-head{display:flex;justify-content:space-between;align-items:flex-start;gap:18px;padding-bottom:12px;border-bottom:1px solid #ddd}.zsm-panel-head h3{font-size:20px;margin:0 0 4px}.zsm-badge{display:inline-block;padding:2px 6px;border-radius:9px;background:#ddd;font-size:11px}.zsm-create{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:14px 0}.zsm-create input[type=text]{min-width:230px}.zsm-table-wrap{overflow-x:auto}.zsm-table{width:100%;border-collapse:collapse}.zsm-table th,.zsm-table td{padding:8px 6px;border-bottom:1px solid #ddd;text-align:left}.zsm-actions{white-space:nowrap}.zsm-actions form{display:inline-block;margin:0 3px 3px 0}.zsm-lock{font-weight:bold}.zsm-more{margin:12px 0 0}@media(max-width:850px){.zsm-snapshot-layout{grid-template-columns:1fr}.zsm-dataset-nav{border-right:0;border-bottom:1px solid #ccc}.zsm-dataset-list{max-height:240px}.zsm-appbar{align-items:flex-start;flex-direction:column}}
 </style>
-<div id="zsm-status" class="zsm-status"></div>
 
-<?php if(!$datasets): ?>
-<p>No ZFS filesystems or volumes were found. Verify that the pool is imported and <code>zfs list</code> works.</p>
+<div class="zsm-appbar">
+  <div><h2>Snapshot manager</h2><div class="zsm-muted"><?=count($datasets)?> datasets · <?=$visibleSnapshotCount?> snapshots</div></div>
+  <div class="zsm-app-actions"><a class="button" href="/Settings/ZFS-Snapshot-Manager/ZFS-Schedules?create=1" onclick="var tab=document.getElementById('tab3');if(tab){tab.click();zsmOpenWizard(null);return false;}">Create policy</a><?php if($showAll): ?><a class="button" href="/Settings/ZFS-Snapshot-Manager" onclick="$.cookie('one','tab2',{path:'/'});">Compact view</a><?php else: ?><a class="button" href="/Settings/ZFS-Snapshot-Manager?all=1" onclick="$.cookie('one','tab2',{path:'/'});">Show all snapshots</a><?php endif; ?></div>
+</div>
+
+<?php if(!$datasets): ?><p>No ZFS filesystems or volumes were found. Verify that the pool is imported and <code>zfs list</code> works.</p><?php else: ?>
+<div class="zsm-snapshot-layout">
+  <aside class="zsm-dataset-nav">
+    <div class="zsm-filter"><input type="search" id="zsm-dataset-filter" placeholder="Filter datasets…" aria-label="Filter datasets"></div>
+    <div class="zsm-dataset-list">
+    <?php foreach($datasets as $dataset):$count=count($byDataset[$dataset['name']]??[]);$anchor=zsm_dataset_anchor($dataset['name']); ?>
+      <a href="#<?=$anchor?>" aria-current="<?=$dataset['name']===$selectedName?'true':'false'?>" class="zsm-dataset-item <?=$dataset['name']===$selectedName?'active':''?>" data-target="<?=$anchor?>" data-search="<?=zsm_h(strtolower($dataset['name']))?>"><i class="fa <?=$dataset['type']==='volume'?'fa-hdd-o':'fa-folder-o'?>"></i><span class="zsm-dataset-name"><?=zsm_h($dataset['name'])?></span><span class="zsm-count"><?=$count?></span></a>
+    <?php endforeach; ?>
+    </div>
+  </aside>
+  <main>
+  <?php foreach($datasets as $dataset):$snaps=$byDataset[$dataset['name']]??[];$anchor=zsm_dataset_anchor($dataset['name']);$displaySnaps=array_reverse($snaps);$hiddenCount=0;if(!$showAll&&count($displaySnaps)>$rowLimit){$hiddenCount=count($displaySnaps)-$rowLimit;$displaySnaps=array_slice($displaySnaps,0,$rowLimit);} ?>
+    <section class="zsm-panel" id="<?=$anchor?>" data-panel <?=$dataset['name']===$selectedName?'':'hidden'?>>
+      <header class="zsm-panel-head"><div><h3><?=zsm_h($dataset['name'])?> <span class="zsm-badge"><?=zsm_h($dataset['type'])?></span></h3><div class="zsm-muted"><?=count($snaps)?> snapshots · Used <?=zsm_bytes($dataset['used'])?> · Free <?=zsm_bytes($dataset['available'])?> · <?=zsm_h($dataset['mountpoint'])?></div></div></header>
+      <form method="post" action="/update.php" target="progressFrame" class="zsm-create" onsubmit="this.elements.namedItem('#arg[4]').value=this.elements.recursive_ui.checked?'1':'0';setTimeout(function(){location.hash='<?=$anchor?>';location.reload();},700);">
+        <?=zsm_csrf_input($csrf)?><input type="hidden" name="#command" value="<?=ZSM_MANAGER_SCRIPT?>"><input type="hidden" name="#arg[1]" value="create-snapshot"><input type="hidden" name="#arg[2]" value="<?=zsm_h($dataset['name'])?>"><input type="hidden" name="#arg[4]" value="0"><input type="hidden" name="#arg[5]" value="manual">
+        <input type="text" name="#arg[3]" value="manual-<?=date('Ymd-His')?>" pattern="[A-Za-z0-9_.:-]+" placeholder="blank = auto name"><label><input type="checkbox" name="recursive_ui" value="1"> Recursive</label><button type="submit">Create snapshot</button>
+      </form>
+      <div class="zsm-table-wrap"><table class="zsm-table"><thead><tr><th>Snapshot</th><th>Created</th><th>Used</th><th>Source</th><th>Protected</th><th>Actions</th></tr></thead><tbody>
+      <?php if(!$snaps): ?><tr><td colspan="6"><em>No snapshots</em></td></tr><?php endif; ?>
+      <?php foreach($displaySnaps as $snap):$browse=zsm_browse_url($snap['name'],$datasetMap[$snap['dataset']]??null); ?>
+        <tr><td><?=zsm_h($snap['snap'])?></td><td><?=date('Y-m-d H:i:s',$snap['creation'])?></td><td><?=zsm_bytes($snap['used'])?></td><td><?=zsm_h($snap['source']?:($snap['managed']?'managed':'external'))?><?php if($snap['policy']): ?> <span class="zsm-muted"><?=zsm_h(substr($snap['policy'],0,8))?></span><?php endif; ?></td><td class="zsm-lock"><?php if($snap['held']): ?>🔒 ZSM<?php elseif($snap['any_held']): ?>🔒 External<?php else: ?>No<?php endif; ?></td>
+        <td class="zsm-actions">
+          <?php if($browse): ?><a class="button" href="<?=zsm_h($browse)?>">Browse</a><?php endif; ?>
+          <?php if(!$snap['any_held']||$snap['held']): ?><form method="post" action="/update.php" target="progressFrame" onsubmit="setTimeout(function(){location.hash='<?=$anchor?>';location.reload();},700);"><?=zsm_csrf_input($csrf)?><input type="hidden" name="#command" value="<?=ZSM_MANAGER_SCRIPT?>"><input type="hidden" name="#arg[1]" value="<?=$snap['held']?'release':'hold'?>"><input type="hidden" name="#arg[2]" value="<?=zsm_h($snap['name'])?>"><button type="submit"><?=$snap['held']?'Unlock':'Lock'?></button></form><?php endif; ?>
+          <form method="post" action="/update.php" target="progressFrame" onsubmit="var v=window.prompt('Clone dataset name:',this.elements.clone_default.value);if(!v)return false;this.elements.namedItem('#arg[3]').value=v;setTimeout(function(){location.hash='<?=$anchor?>';location.reload();},700);"><?=zsm_csrf_input($csrf)?><input type="hidden" name="#command" value="<?=ZSM_MANAGER_SCRIPT?>"><input type="hidden" name="#arg[1]" value="clone-snapshot"><input type="hidden" name="#arg[2]" value="<?=zsm_h($snap['name'])?>"><input type="hidden" name="#arg[3]" value=""><input type="hidden" name="clone_default" value="<?=zsm_h($snap['dataset'])?>-clone"><button type="submit">Clone</button></form>
+          <form method="post" action="/update.php" target="progressFrame" onsubmit="if(!window.confirm('Rollback to this snapshot? Only the newest snapshot is allowed. Data written after it will be lost.'))return false;setTimeout(function(){location.hash='<?=$anchor?>';location.reload();},700);"><?=zsm_csrf_input($csrf)?><input type="hidden" name="#command" value="<?=ZSM_MANAGER_SCRIPT?>"><input type="hidden" name="#arg[1]" value="rollback"><input type="hidden" name="#arg[2]" value="<?=zsm_h($snap['name'])?>"><button type="submit">Rollback</button></form>
+          <form method="post" action="/update.php" target="progressFrame" onsubmit="if(!window.confirm('Delete snapshot <?=zsm_h($snap['name'])?>? This does not use -R and will fail safely if ZFS dependencies exist.'))return false;setTimeout(function(){location.hash='<?=$anchor?>';location.reload();},700);"><?=zsm_csrf_input($csrf)?><input type="hidden" name="#command" value="<?=ZSM_MANAGER_SCRIPT?>"><input type="hidden" name="#arg[1]" value="delete-snapshot"><input type="hidden" name="#arg[2]" value="<?=zsm_h($snap['name'])?>"><button type="submit" <?=$snap['any_held']?'disabled':''?>>Delete</button></form>
+        </td></tr>
+      <?php endforeach; ?>
+      </tbody></table></div>
+      <?php if($hiddenCount): ?><p class="zsm-more"><a class="button" href="/Settings/ZFS-Snapshot-Manager?all=1#<?=$anchor?>" onclick="$.cookie('one','tab2',{path:'/'});">Show <?=$hiddenCount?> older snapshots</a></p><?php endif; ?>
+    </section>
+  <?php endforeach; ?>
+  </main>
+</div>
 <?php endif; ?>
-
-<?php foreach($datasets as $d): $snaps=$byDataset[$d['name']] ?? []; ?>
-<details class="zsm-card" open>
-<summary class="zsm-head">
-  <span><span class="zsm-title"><?=zsm_h($d['name'])?></span> <span class="zsm-badge"><?=zsm_h($d['type'])?></span></span>
-  <span class="zsm-meta"><?=count($snaps)?> snapshots · Used <?=zsm_bytes($d['used'])?> · Free <?=zsm_bytes($d['available'])?> · <?=zsm_h($d['mountpoint'])?></span>
-</summary>
-<div class="zsm-body">
-<form method="post" class="zsm-create zsm-action-form">
-<?=zsm_csrf_input($csrf)?>
-<input type="hidden" name="action" value="create"><input type="hidden" name="dataset" value="<?=zsm_h($d['name'])?>">
-<input type="text" name="snapname" value="manual-<?=date('Ymd-His')?>" pattern="[A-Za-z0-9_.:-]+" placeholder="blank = auto name">
-<label><input type="checkbox" name="recursive" value="1"> Recursive</label>
-<button type="submit">Create snapshot</button>
-</form>
-<table class="zsm-table"><thead><tr><th>Snapshot</th><th>Created</th><th>Used</th><th>Source</th><th>Protected</th><th>Actions</th></tr></thead><tbody>
-<?php if(!$snaps): ?><tr><td colspan="6"><em>No snapshots</em></td></tr><?php endif; ?>
-<?php foreach(array_reverse($snaps) as $s): $browse=zsm_browse_url($s['name'], $datasetMap[$s['dataset']] ?? null); ?>
-<tr>
-<td><?=zsm_h($s['snap'])?></td><td><?=date('Y-m-d H:i:s',$s['creation'])?></td><td><?=zsm_bytes($s['used'])?></td>
-<td><?=zsm_h($s['source'] ?: ($s['managed'] ? 'managed' : 'external'))?><?php if($s['policy']): ?> <span class="zsm-meta"><?=zsm_h(substr($s['policy'],0,8))?></span><?php endif; ?></td>
-<td class="zsm-lock"><?php if($s['held']): ?>🔒 ZSM<?php elseif($s['any_held']): ?>🔒 External<?php else: ?>No<?php endif; ?></td>
-<td class="zsm-actions">
-<?php if($browse): ?><a class="button" href="<?=zsm_h($browse)?>">Browse</a><?php endif; ?>
-<?php if(!$s['any_held'] || $s['held']): ?><form method="post" class="zsm-action-form"><?=zsm_csrf_input($csrf)?><input type="hidden" name="action" value="<?=$s['held']?'release':'hold'?>"><input type="hidden" name="snapshot" value="<?=zsm_h($s['name'])?>"><button type="submit"><?=$s['held']?'Unlock':'Lock'?></button></form><?php endif; ?>
-<form method="post" class="zsm-action-form zsm-clone-form"><?=zsm_csrf_input($csrf)?><input type="hidden" name="action" value="clone"><input type="hidden" name="snapshot" value="<?=zsm_h($s['name'])?>"><input type="hidden" name="clone" value=""><input type="hidden" name="clone_default" value="<?=zsm_h($s['dataset'])?>-clone"><button type="submit">Clone</button></form>
-<form method="post" class="zsm-action-form" data-confirm="Rollback to this snapshot? Only the newest snapshot is allowed. Data written after it will be lost."><?=zsm_csrf_input($csrf)?><input type="hidden" name="action" value="rollback"><input type="hidden" name="snapshot" value="<?=zsm_h($s['name'])?>"><button type="submit">Rollback</button></form>
-<form method="post" class="zsm-action-form" data-confirm="Delete snapshot <?=zsm_h($s['name'])?>? This does not use -R and will fail safely if ZFS dependencies exist."><?=zsm_csrf_input($csrf)?><input type="hidden" name="action" value="delete"><input type="hidden" name="snapshot" value="<?=zsm_h($s['name'])?>"><button type="submit" <?=$s['any_held']?'disabled':''?>>Delete</button></form>
-</td></tr>
-<?php endforeach; ?>
-</tbody></table>
-</div></details>
-<?php endforeach; ?>
-
-<h3>Recent activity</h3>
-<pre style="max-height:220px;overflow:auto"><?php
-$log=@file(ZSM_LOG, FILE_IGNORE_NEW_LINES); if(!$log){echo "No activity yet.";} else {foreach(array_slice($log,-80) as $line) echo zsm_h($line)."\n";}
-?></pre>
 
 <script>
 (function(){
-  function status(text, kind) {
-    var el = document.getElementById('zsm-status');
-    el.textContent = text;
-    el.className = 'zsm-status ' + kind;
-    el.scrollIntoView({behavior:'smooth', block:'nearest'});
+  var buttons=Array.prototype.slice.call(document.querySelectorAll('.zsm-dataset-item'));
+  var panels=Array.prototype.slice.call(document.querySelectorAll('[data-panel]'));
+  function selectPanel(id,writeHash){
+    if(!document.getElementById(id))return;
+    panels.forEach(function(panel){panel.hidden=panel.id!==id;});
+    buttons.forEach(function(button){var active=button.getAttribute('data-target')===id;button.classList.toggle('active',active);button.setAttribute('aria-current',active?'true':'false');});
+    if(writeHash)history.replaceState(null,'','#'+id);
   }
-
-  document.querySelectorAll('.zsm-action-form').forEach(function(form){
-    form.addEventListener('submit', async function(ev){
-      ev.preventDefault();
-      var confirmText = form.getAttribute('data-confirm');
-      if (confirmText && !window.confirm(confirmText)) return;
-
-      if (form.classList.contains('zsm-clone-form')) {
-        var def = form.querySelector('input[name=clone_default]').value;
-        var clone = window.prompt('Clone dataset name:', def);
-        if (!clone) return;
-        form.querySelector('input[name=clone]').value = clone;
-      }
-
-      var button = form.querySelector('button[type=submit]');
-      var oldText = button ? button.textContent : '';
-      if (button) { button.disabled = true; button.textContent = 'Working…'; }
-      status('Running ZFS operation…', 'busy');
-
-      try {
-        var response = await fetch('/plugins/zsnapshot.manager/action.php', {
-          method: 'POST',
-          body: new FormData(form),
-          credentials: 'same-origin',
-          cache: 'no-store'
-        });
-        var text = await response.text();
-        var data;
-        try { data = JSON.parse(text); } catch(e) { throw new Error(text || ('HTTP ' + response.status)); }
-        if (!response.ok || !data.ok) throw new Error(data.message || 'Operation failed');
-        status(data.message || 'Operation completed', 'ok');
-        window.setTimeout(function(){ location.reload(); }, 250);
-      } catch (e) {
-        status(e.message || String(e), 'err');
-        if (button) { button.disabled = false; button.textContent = oldText; }
-      }
-    });
-  });
+  buttons.forEach(function(button){button.addEventListener('click',function(event){event.preventDefault();selectPanel(button.getAttribute('data-target'),true);});});
+  var filter=document.getElementById('zsm-dataset-filter');
+  if(filter)filter.addEventListener('input',function(){var needle=filter.value.trim().toLowerCase();buttons.forEach(function(button){button.hidden=needle!==''&&button.getAttribute('data-search').indexOf(needle)===-1;});});
+  if(location.hash)selectPanel(location.hash.slice(1),false);
+  window.addEventListener('hashchange',function(){if(location.hash)selectPanel(location.hash.slice(1),false);});
 })();
 </script>

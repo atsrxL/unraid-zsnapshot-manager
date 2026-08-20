@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 const ZSM_CONFIG_DIR = '/boot/config/plugins/zsnapshot.manager';
 const ZSM_SCHEDULES = ZSM_CONFIG_DIR . '/schedules.json';
+const ZSM_SETTINGS = ZSM_CONFIG_DIR . '/settings.cfg';
 const ZSM_LOG = '/var/log/zsnapshot-manager.log';
 const ZSM_HOLD_TAG = 'zsm-protect';
 const ZSM_MANAGED_PROP = 'io.github.atsrxl:managed';
@@ -11,11 +12,14 @@ const ZSM_SOURCE_PROP = 'io.github.atsrxl:source';
 const ZSM_POLICY_PROP = 'io.github.atsrxl:policy';
 const ZSM_MANAGER_SCRIPT = '/usr/local/emhttp/plugins/zsnapshot.manager/scripts/zsm-manager.sh';
 const ZSM_SCHEDULER_SCRIPT = '/usr/local/emhttp/plugins/zsnapshot.manager/scripts/zsm-scheduler';
+const ZSM_POLICY_SCRIPT = '/usr/local/emhttp/plugins/zsnapshot.manager/scripts/zsm-policy-manager';
+const ZSM_SETTINGS_SCRIPT = '/usr/local/emhttp/plugins/zsnapshot.manager/scripts/zsm-settings-manager';
 
 function zsm_init(): void
 {
     if (!is_dir(ZSM_CONFIG_DIR)) @mkdir(ZSM_CONFIG_DIR, 0755, true);
     if (!file_exists(ZSM_SCHEDULES)) @file_put_contents(ZSM_SCHEDULES, "[]\n");
+    if (!file_exists(ZSM_SETTINGS)) @file_put_contents(ZSM_SETTINGS, "SHOW_ROOT_DATASETS=\"yes\"\nEXCLUDED_POOLS=\"\"\n");
 }
 
 function zsm_log(string $message): void
@@ -88,14 +92,69 @@ function zsm_valid_snapshot(string $name): bool
     return zsm_valid_dataset($dataset) && zsm_valid_snapshot_name($snap);
 }
 
-function zsm_datasets(): array
+function zsm_settings(): array
 {
+    zsm_init();
+    $raw = @parse_ini_file(ZSM_SETTINGS, false, INI_SCANNER_RAW);
+    return [
+        'show_root_datasets' => strtolower((string)($raw['SHOW_ROOT_DATASETS'] ?? 'yes')) !== 'no',
+        'excluded_pools' => zsm_normalize_pool_names((string)($raw['EXCLUDED_POOLS'] ?? '')),
+    ];
+}
+
+function zsm_normalize_pool_names(array|string $pools): array
+{
+    if (is_string($pools)) $pools = explode(',', $pools);
+    $clean = [];
+    foreach ($pools as $pool) {
+        $pool = trim((string)$pool);
+        if ($pool === '' || preg_match('/^[A-Za-z0-9_.:-]+$/', $pool) !== 1) continue;
+        $clean[$pool] = true;
+    }
+    $names = array_keys($clean);
+    sort($names, SORT_NATURAL | SORT_FLAG_CASE);
+    return $names;
+}
+
+function zsm_save_settings(array $settings): bool
+{
+    zsm_init();
+    $showRoot = !empty($settings['show_root_datasets']) ? 'yes' : 'no';
+    $excludedPools = zsm_normalize_pool_names($settings['excluded_pools'] ?? []);
+    $tmp = ZSM_SETTINGS . '.tmp';
+    $content = 'SHOW_ROOT_DATASETS="' . $showRoot . '"' . "\n"
+        . 'EXCLUDED_POOLS="' . implode(',', $excludedPools) . '"' . "\n";
+    $ok = @file_put_contents($tmp, $content, LOCK_EX) !== false;
+    if ($ok) {
+        @chmod($tmp, 0600);
+        $ok = @rename($tmp, ZSM_SETTINGS);
+    }
+    if (!$ok) @unlink($tmp);
+    return $ok;
+}
+
+function zsm_show_root_datasets(): bool
+{
+    return zsm_settings()['show_root_datasets'];
+}
+
+function zsm_excluded_pools(): array
+{
+    return zsm_settings()['excluded_pools'];
+}
+
+function zsm_datasets(?bool $includeRoot = null, bool $applyExclusions = true): array
+{
+    $includeRoot ??= zsm_show_root_datasets();
+    $excluded = $applyExclusions ? array_flip(zsm_excluded_pools()) : [];
     $out = zsm_exec([zsm_zfs_bin(), 'list', '-H', '-p', '-o', 'name,type,mountpoint,used,available', '-t', 'filesystem,volume'], $rc);
     if ($rc !== 0 || $out === '') return [];
     $rows = [];
     foreach (explode("\n", $out) as $line) {
         $p = explode("\t", $line);
         if (count($p) < 5) continue;
+        if (isset($excluded[strtok($p[0], '/')])) continue;
+        if (!$includeRoot && !str_contains($p[0], '/')) continue;
         $rows[] = [
             'name' => $p[0],
             'type' => $p[1],
@@ -107,8 +166,9 @@ function zsm_datasets(): array
     return $rows;
 }
 
-function zsm_snapshots(): array
+function zsm_snapshots(bool $applyExclusions = true): array
 {
+    $excluded = $applyExclusions ? array_flip(zsm_excluded_pools()) : [];
     $properties = implode(',', [
         'name', 'creation', 'used', 'refer', 'userrefs',
         ZSM_MANAGED_PROP, ZSM_SOURCE_PROP, ZSM_POLICY_PROP
@@ -117,12 +177,14 @@ function zsm_snapshots(): array
     if ($rc !== 0 || $out === '') return [];
 
     $rows = [];
+    $heldCandidates = [];
     foreach (explode("\n", $out) as $line) {
         $p = explode("\t", $line);
         if (count($p) < 8 || !zsm_valid_snapshot($p[0])) continue;
         [$dataset, $snap] = explode('@', $p[0], 2);
+        if (isset($excluded[strtok($dataset, '/')])) continue;
         $userrefs = (int)$p[4];
-        $pluginHeld = $userrefs > 0 ? zsm_is_held($p[0]) : false;
+        if ($userrefs > 0) $heldCandidates[] = $p[0];
         $rows[] = [
             'name' => $p[0],
             'dataset' => $dataset,
@@ -131,14 +193,32 @@ function zsm_snapshots(): array
             'used' => (int)$p[2],
             'refer' => (int)$p[3],
             'userrefs' => $userrefs,
-            'held' => $pluginHeld,
+            'held' => false,
             'any_held' => $userrefs > 0,
             'managed' => $p[5] === '1',
             'source' => $p[6] === '-' ? '' : $p[6],
             'policy' => $p[7] === '-' ? '' : $p[7],
         ];
     }
+    $pluginHeld = zsm_plugin_held_set($heldCandidates);
+    foreach ($rows as &$row) $row['held'] = isset($pluginHeld[$row['name']]);
+    unset($row);
     return $rows;
+}
+
+function zsm_plugin_held_set(array $snapshots): array
+{
+    $held = [];
+    $snapshots = array_values(array_unique(array_filter($snapshots, 'zsm_valid_snapshot')));
+    foreach (array_chunk($snapshots, 200) as $chunk) {
+        $out = zsm_exec(array_merge([zsm_zfs_bin(), 'holds', '-H'], $chunk), $rc);
+        if ($rc !== 0 || $out === '') continue;
+        foreach (explode("\n", $out) as $line) {
+            $p = preg_split('/\s+/', trim($line));
+            if (($p[1] ?? '') === ZSM_HOLD_TAG && isset($p[0])) $held[$p[0]] = true;
+        }
+    }
+    return $held;
 }
 
 function zsm_get_prop(string $target, string $prop): string
@@ -279,18 +359,48 @@ function zsm_load_schedules(): array
 function zsm_save_schedules(array $rows): bool
 {
     zsm_init();
-    $ok = @file_put_contents(
-        ZSM_SCHEDULES,
-        json_encode(array_values($rows), JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n",
-        LOCK_EX
-    ) !== false;
+    $json = json_encode(array_values($rows), JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
+    if ($json === false) return false;
+    $tmp = ZSM_SCHEDULES . '.tmp';
+    $ok = @file_put_contents($tmp, $json . "\n", LOCK_EX) !== false;
+    if ($ok) {
+        @chmod($tmp, 0600);
+        $ok = @rename($tmp, ZSM_SCHEDULES);
+    }
+    if (!$ok) @unlink($tmp);
     if ($ok) zsm_regenerate_cron($rows);
     return $ok;
 }
 
+function zsm_valid_cron_field(string $field, int $min, int $max): bool
+{
+    if ($field === '') return false;
+    foreach (explode(',', $field) as $part) {
+        if (!preg_match('/^(\*|\d+|\d+-\d+)(?:\/(\d+))?$/', $part, $match)) return false;
+        $base = $match[1];
+        $step = isset($match[2]) ? (int)$match[2] : 0;
+        if (isset($match[2]) && ($step < 1 || $step > ($max - $min + 1))) return false;
+        if ($base === '*') continue;
+        if (str_contains($base, '-')) {
+            [$start, $end] = array_map('intval', explode('-', $base, 2));
+            if ($start < $min || $end > $max || $start > $end) return false;
+        } else {
+            $value = (int)$base;
+            if ($value < $min || $value > $max) return false;
+        }
+    }
+    return true;
+}
+
 function zsm_valid_cron(string $cron): bool
 {
-    return preg_match('/^[0-9*\/,-]+\s+[0-9*\/,-]+\s+[0-9*\/,-]+\s+[0-9*\/,-]+\s+[0-9*\/,-]+$/', trim($cron)) === 1;
+    $parts = preg_split('/\s+/', trim($cron));
+    if (!is_array($parts) || count($parts) !== 5) return false;
+    return zsm_valid_cron_field($parts[0], 0, 59)
+        && zsm_valid_cron_field($parts[1], 0, 23)
+        && zsm_valid_cron_field($parts[2], 1, 31)
+        && zsm_valid_cron_field($parts[3], 1, 12)
+        && zsm_valid_cron_field($parts[4], 0, 7);
 }
 
 function zsm_regenerate_cron(?array $rows = null): void

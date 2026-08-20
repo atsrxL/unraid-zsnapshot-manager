@@ -2,13 +2,41 @@
 <!DOCTYPE PLUGIN [
 <!ENTITY name "zsnapshot.manager">
 <!ENTITY author "atsrxL">
-<!ENTITY version "2026.08.20c">
+<!ENTITY version "2026.08.20h">
 <!ENTITY launch "Settings/ZFS-Snapshot-Manager">
 <!ENTITY pluginURL "https://raw.githubusercontent.com/atsrxL/unraid-zsnapshot-manager/main/plugin/zsnapshot.manager.plg">
 <!ENTITY baseURL "https://raw.githubusercontent.com/atsrxL/unraid-zsnapshot-manager/main/src/usr/local/emhttp/plugins/zsnapshot.manager">
 ]>
 <PLUGIN name="&name;" author="&author;" version="&version;" launch="&launch;" pluginURL="&pluginURL;" icon="camera" min="7.0.0" project="https://github.com/atsrxL/unraid-zsnapshot-manager" readme="https://github.com/atsrxL/unraid-zsnapshot-manager#readme">
 <CHANGES>
+### 2026.08.20h
+- Added optional multi-pool exclusion in Setting
+- Excluded pools are hidden from Status, Snapshots and new Policy targets
+- Existing snapshots and policies remain untouched
+
+### 2026.08.20g
+- Added a compact Status dashboard for pool capacity, snapshots, protection and policies
+- Reworked Snapshots into a dataset navigator with one focused snapshot panel
+- Moved the runtime activity log to the Setting tab
+- Fixed tab order to Status, Snapshots, Schedules, Setting using native Unraid menu ranks
+
+### 2026.08.20f
+- Fixed Policy saves by replacing the removed JSON endpoint with Unraid's native command form channel
+- Added a Settings tab with a persistent Show root datasets switch
+- Collapsed empty datasets by default and added dataset filtering plus expand/collapse controls
+- Added compact snapshot lists with an explicit Show all option
+- Batched ZFS hold discovery to remove per-snapshot command calls
+
+### 2026.08.20e
+- Snapshot actions now use Unraid-native page POSTs and the verified command backend
+
+### 2026.08.20d
+- Added a guided Create snapshot policy button to the Snapshots home tab
+- Added a three-step policy wizard and per-policy editing
+- Each policy independently stores its target, frequency, retention, recursion and notification settings
+- Fixed Run now on disabled policies so it actually performs the requested snapshot
+- Added range-aware cron validation and atomic policy file writes
+
 ### 2026.08.20c
 - Reworked ZFS mutations to use a dedicated shell backend like unriad-iscsi-manager
 - Snapshot metadata is now written atomically with zfs snapshot -o instead of follow-up zfs set calls
@@ -63,8 +91,17 @@ mkdir -p /usr/local/emhttp/plugins/zsnapshot.manager/scripts
 <FILE Name="/usr/local/emhttp/plugins/&name;/scripts/zsm-scheduler">
 <URL>&baseURL;/scripts/zsm-scheduler</URL>
 </FILE>
+<FILE Name="/usr/local/emhttp/plugins/&name;/scripts/zsm-policy-manager">
+<URL>&baseURL;/scripts/zsm-policy-manager</URL>
+</FILE>
+<FILE Name="/usr/local/emhttp/plugins/&name;/scripts/zsm-settings-manager">
+<URL>&baseURL;/scripts/zsm-settings-manager</URL>
+</FILE>
 <FILE Name="/usr/local/emhttp/plugins/&name;/ZFS-Snapshot-Manager.page">
 <URL>&baseURL;/ZFS-Snapshot-Manager.page</URL>
+</FILE>
+<FILE Name="/usr/local/emhttp/plugins/&name;/ZFS-Status.page">
+<URL>&baseURL;/ZFS-Status.page</URL>
 </FILE>
 <FILE Name="/usr/local/emhttp/plugins/&name;/ZFS-Snapshots.page">
 <URL>&baseURL;/ZFS-Snapshots.page</URL>
@@ -72,16 +109,22 @@ mkdir -p /usr/local/emhttp/plugins/zsnapshot.manager/scripts
 <FILE Name="/usr/local/emhttp/plugins/&name;/ZFS-Schedules.page">
 <URL>&baseURL;/ZFS-Schedules.page</URL>
 </FILE>
+<FILE Name="/usr/local/emhttp/plugins/&name;/ZFS-Settings.page">
+<URL>&baseURL;/ZFS-Settings.page</URL>
+</FILE>
 
 <FILE Run="/bin/bash">
 <INLINE><![CDATA[
 set -e
 mkdir -p /boot/config/plugins/zsnapshot.manager
 [ -f /boot/config/plugins/zsnapshot.manager/schedules.json ] || printf '[]\n' > /boot/config/plugins/zsnapshot.manager/schedules.json
+[ -f /boot/config/plugins/zsnapshot.manager/settings.cfg ] || printf 'SHOW_ROOT_DATASETS="yes"\nEXCLUDED_POOLS=""\n' > /boot/config/plugins/zsnapshot.manager/settings.cfg
 chmod 0755 /usr/local/emhttp/plugins/zsnapshot.manager/scripts/zsm-manager.sh
 chmod 0755 /usr/local/emhttp/plugins/zsnapshot.manager/scripts/zsm-scheduler
+chmod 0755 /usr/local/emhttp/plugins/zsnapshot.manager/scripts/zsm-policy-manager
+chmod 0755 /usr/local/emhttp/plugins/zsnapshot.manager/scripts/zsm-settings-manager
 php -r "require '/usr/local/emhttp/plugins/zsnapshot.manager/include/lib.php'; zsm_regenerate_cron();"
-echo "ZFS Snapshot Manager 2026.08.20c installed"
+echo "ZFS Snapshot Manager 2026.08.20h installed"
 ]]></INLINE>
 </FILE>
 

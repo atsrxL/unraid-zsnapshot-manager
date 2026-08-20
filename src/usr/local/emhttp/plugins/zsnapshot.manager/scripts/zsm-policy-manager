@@ -1,0 +1,81 @@
+#!/usr/bin/php
+<?php
+
+declare(strict_types=1);
+require_once dirname(__DIR__) . '/include/lib.php';
+
+function fail(string $message, int $code = 1): never
+{
+    fwrite(STDERR, "ERROR: {$message}\n");
+    exit($code);
+}
+
+$action = (string)($argv[1] ?? '');
+$id = preg_replace('/[^a-f0-9]/i', '', (string)($argv[2] ?? ''));
+$schedules = zsm_load_schedules();
+
+if ($action === 'add' || $action === 'update') {
+    $name = trim((string)($argv[3] ?? 'Policy')) ?: 'Policy';
+    $target = trim((string)($argv[4] ?? ''));
+    $cron = trim((string)($argv[5] ?? ''));
+    $retention = zsm_retention_counts([
+        'hourly' => (int)($argv[6] ?? 24),
+        'daily' => (int)($argv[7] ?? 7),
+        'monthly' => (int)($argv[8] ?? 12),
+        'yearly' => (int)($argv[9] ?? 3),
+    ]);
+    if (!zsm_valid_dataset($target)) fail('Invalid target dataset/zvol');
+    if (!zsm_valid_cron($cron)) fail('Invalid cron expression (5 fields required)');
+    if (!in_array($target, array_column(zsm_datasets(true, false), 'name'), true)) fail('Target dataset/zvol does not exist');
+    $policy = [
+        'name' => $name,
+        'target' => $target,
+        'cron' => $cron,
+        'retention_mode' => 'smart',
+        'retention' => $retention,
+        'recursive' => (($argv[10] ?? '0') === '1'),
+        'notify' => (($argv[11] ?? 'failure') === 'always' ? 'always' : 'failure'),
+    ];
+    if ($action === 'add') {
+        $id = bin2hex(random_bytes(8));
+        $schedules[] = ['id' => $id, 'enabled' => true] + $policy;
+    } else {
+        if ($id === '') fail('Invalid policy id');
+        $found = false;
+        foreach ($schedules as &$row) {
+            if (($row['id'] ?? '') !== $id) continue;
+            $row = ['id' => $id, 'enabled' => !empty($row['enabled'])] + $policy;
+            $found = true;
+            break;
+        }
+        unset($row);
+        if (!$found) fail('Policy not found');
+    }
+    if (!zsm_save_schedules($schedules)) fail('Failed to save policies');
+    echo ($action === 'add' ? 'Policy created: ' : 'Policy updated: ') . $id . "\n";
+    exit(0);
+}
+
+if (!in_array($action, ['delete', 'toggle', 'run'], true) || $id === '') fail('Invalid policy action');
+$index = null;
+foreach ($schedules as $i => $row) {
+    if (($row['id'] ?? '') === $id) { $index = $i; break; }
+}
+if ($index === null) fail('Policy not found');
+
+if ($action === 'delete') {
+    array_splice($schedules, $index, 1);
+    if (!zsm_save_schedules($schedules)) fail('Failed to save policies');
+    echo "Policy deleted: {$id}\n";
+    exit(0);
+}
+if ($action === 'toggle') {
+    $schedules[$index]['enabled'] = empty($schedules[$index]['enabled']);
+    if (!zsm_save_schedules($schedules)) fail('Failed to save policies');
+    echo 'Policy ' . (!empty($schedules[$index]['enabled']) ? 'enabled: ' : 'disabled: ') . $id . "\n";
+    exit(0);
+}
+
+$out = zsm_exec_timeout([ZSM_SCHEDULER_SCRIPT, $id, '--force'], 120, $rc);
+if ($rc !== 0) fail($out ?: 'Policy execution failed');
+echo ($out !== '' ? $out : "Policy executed: {$id}") . "\n";

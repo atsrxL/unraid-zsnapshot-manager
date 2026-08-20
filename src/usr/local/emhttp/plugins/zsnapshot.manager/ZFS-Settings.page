@@ -1,0 +1,42 @@
+Menu="ZFS-Snapshot-Manager:40"
+Title="Setting"
+Tag="cog"
+---
+<?php
+require_once '/usr/local/emhttp/plugins/zsnapshot.manager/include/lib.php';
+$csrf = zsm_csrf_token();
+$settings = zsm_settings();
+$poolNames = [];
+foreach (zsm_datasets(true, false) as $row) $poolNames[strtok($row['name'], '/')] = true;
+$poolNames = array_keys($poolNames);
+sort($poolNames, SORT_NATURAL | SORT_FLAG_CASE);
+function zsm_h3($v){ return htmlspecialchars((string)$v, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); }
+?>
+<style>
+.zsm-settings-card{max-width:760px;border:1px solid #ccc;border-radius:5px;padding:16px;margin:12px 0;background:rgba(127,127,127,.04)}
+.zsm-setting-row{display:flex;justify-content:space-between;align-items:center;gap:24px}.zsm-setting-row h3{margin:0 0 5px}.zsm-help{opacity:.75}.zsm-switch{position:relative;display:inline-block;width:46px;height:24px}.zsm-switch input{opacity:0;width:0;height:0}.zsm-slider{position:absolute;inset:0;cursor:pointer;background:#aaa;border-radius:24px;transition:.2s}.zsm-slider:before{content:"";position:absolute;width:18px;height:18px;left:3px;top:3px;background:#fff;border-radius:50%;transition:.2s}.zsm-switch input:checked+.zsm-slider{background:#2b6cb0}.zsm-switch input:checked+.zsm-slider:before{transform:translateX(22px)}.zsm-divider{border:0;border-top:1px solid #ddd;margin:16px 0}.zsm-pool-options{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:8px;margin:10px 0}.zsm-pool-option{display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid #ddd;border-radius:4px}
+</style>
+<h3>Display settings</h3>
+<form method="post" action="/update.php" target="progressFrame" class="zsm-settings-card" onsubmit="this.elements.namedItem('#arg[1]').value=this.elements.show_root_ui.checked?'yes':'no';var excluded=[];this.querySelectorAll('.zsm-pool-option input:checked').forEach(function(input){excluded.push(input.value);});this.elements.namedItem('#arg[2]').value=excluded.join(',');setTimeout(function(){location.reload();},700);">
+<input type="hidden" name="csrf_token" value="<?=zsm_h3($csrf)?>">
+<input type="hidden" name="#command" value="<?=ZSM_SETTINGS_SCRIPT?>">
+<input type="hidden" name="#arg[1]" value="<?=$settings['show_root_datasets']?'yes':'no'?>">
+<input type="hidden" name="#arg[2]" value="<?=zsm_h3(implode(',', $settings['excluded_pools']))?>">
+<div class="zsm-setting-row">
+  <div><h3>Show root datasets</h3><div class="zsm-help">Show pool root datasets such as <code>tank</code>. Turn this off to list only child datasets and zvols.</div></div>
+  <label class="zsm-switch" title="Show root datasets"><input type="checkbox" name="show_root_ui" value="1" <?=$settings['show_root_datasets']?'checked':''?>><span class="zsm-slider"></span></label>
+</div>
+<hr class="zsm-divider">
+<div><h3>Excluded ZFS pools</h3><div class="zsm-help">Excluded pools are hidden from Status, Snapshots and new Policy targets. Existing snapshots and policies are not deleted or disabled.</div></div>
+<div class="zsm-pool-options">
+<?php foreach($poolNames as $pool): ?><label class="zsm-pool-option"><input type="checkbox" name="exclude_pool_ui[]" value="<?=zsm_h3($pool)?>" <?=in_array($pool,$settings['excluded_pools'],true)?'checked':''?>> <?=zsm_h3($pool)?></label><?php endforeach; ?>
+<?php if(!$poolNames): ?><span class="zsm-help">No imported ZFS pools found.</span><?php endif; ?>
+</div>
+<p><button type="submit">Apply</button></p>
+</form>
+
+<h3>Recent activity</h3>
+<pre style="max-height:320px;overflow:auto"><?php
+$log=@file(ZSM_LOG, FILE_IGNORE_NEW_LINES);
+if(!$log){echo "No activity yet.";}else{foreach(array_slice($log,-100) as $line)echo zsm_h3($line)."\n";}
+?></pre>
