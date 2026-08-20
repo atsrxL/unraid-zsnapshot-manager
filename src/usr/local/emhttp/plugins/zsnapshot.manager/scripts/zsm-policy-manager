@@ -24,9 +24,34 @@ if ($action === 'add' || $action === 'update') {
         'monthly' => (int)($argv[8] ?? 12),
         'yearly' => (int)($argv[9] ?? 3),
     ]);
+
+    $allTargets = array_column(zsm_datasets(true, false), 'name');
+    $visibleTargets = array_column(zsm_datasets(), 'name');
+    $existingIndex = null;
+    if ($action === 'update') {
+        if ($id === '') fail('Invalid policy id');
+        foreach ($schedules as $index => $row) {
+            if (($row['id'] ?? '') === $id) {
+                $existingIndex = $index;
+                break;
+            }
+        }
+        if ($existingIndex === null) fail('Policy not found');
+        $existingTarget = (string)($schedules[$existingIndex]['target'] ?? '');
+        if ($existingTarget !== '' && !in_array($existingTarget, $visibleTargets, true)) {
+            // The UI cannot represent an excluded/hidden target. Preserve it so editing
+            // retention/frequency can never silently retarget the policy.
+            $target = $existingTarget;
+        }
+    }
+
     if (!zsm_valid_dataset($target)) fail('Invalid target dataset/zvol');
     if (!zsm_valid_cron($cron)) fail('Invalid cron expression (5 fields required)');
-    if (!in_array($target, array_column(zsm_datasets(true, false), 'name'), true)) fail('Target dataset/zvol does not exist');
+    if (!in_array($target, $allTargets, true)) fail('Target dataset/zvol does not exist');
+    if ($action === 'add' && !in_array($target, $visibleTargets, true)) {
+        fail('Target dataset/zvol is hidden by current Settings');
+    }
+
     $policy = [
         'name' => $name,
         'target' => $target,
@@ -40,16 +65,8 @@ if ($action === 'add' || $action === 'update') {
         $id = bin2hex(random_bytes(8));
         $schedules[] = ['id' => $id, 'enabled' => true] + $policy;
     } else {
-        if ($id === '') fail('Invalid policy id');
-        $found = false;
-        foreach ($schedules as &$row) {
-            if (($row['id'] ?? '') !== $id) continue;
-            $row = ['id' => $id, 'enabled' => !empty($row['enabled'])] + $policy;
-            $found = true;
-            break;
-        }
-        unset($row);
-        if (!$found) fail('Policy not found');
+        $enabled = !empty($schedules[$existingIndex]['enabled']);
+        $schedules[$existingIndex] = ['id' => $id, 'enabled' => $enabled] + $policy;
     }
     if (!zsm_save_schedules($schedules)) fail('Failed to save policies');
     echo ($action === 'add' ? 'Policy created: ' : 'Policy updated: ') . $id . "\n";
