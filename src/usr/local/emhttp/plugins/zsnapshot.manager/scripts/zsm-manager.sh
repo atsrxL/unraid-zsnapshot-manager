@@ -97,8 +97,18 @@ cmd_release() {
 
 cmd_clone_snapshot() {
   require_zfs
-  local snapshot="${1:-}" target="${2:-}"
+  local snapshot="${1:-}" target="${2:-}" source pool
   snapshot_exists "$snapshot" || fail "snapshot does not exist: $snapshot"
+  source="${snapshot%@*}"
+  pool="${source%%/*}"
+
+  # A single component is treated as a dataset name inside the source pool.
+  # This also makes cloning a pool-root snapshot useful instead of trying to
+  # create a non-existent pool such as "tank-clone".
+  if [[ -n "$target" && "$target" != */* ]]; then
+    target="${pool}/${target}"
+  fi
+
   valid_dataset "$target" || fail "invalid clone dataset: $target"
   if "$ZFS_BIN" list -H -o name "$target" >/dev/null 2>&1; then
     fail "clone target already exists: $target"
